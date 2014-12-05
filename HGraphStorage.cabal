@@ -1,0 +1,41 @@
+name:           HGraphStorage
+version:        0.1
+cabal-version:  >=1.8
+build-type:     Simple
+author:         jpmoresmau
+
+library
+  hs-source-dirs:  src
+  build-depends:   
+                   base >= 4,
+                   binary,
+                   filepath,
+                   directory,
+                   bytestring,
+                   text,
+                   data-default,
+                   containers,
+                   lifted-base,
+                   transformers-base
+  ghc-options:     -Wall
+  other-modules:   
+                   Database.Graph.HGraphStorage.Types,
+                   Database.Graph.HGraphStorage.Constants,
+                   Database.Graph.HGraphStorage.Graph
+  exposed-modules: Database.Graph.HGraphStorage.FileOps
+
+executable HGraphStorage
+  hs-source-dirs:  exe
+  main-is:         Main.hs
+  build-depends:   
+                   base >= 4, HGraphStorage, binary,
+                   filepath,
+                   directory,
+                   bytestring,
+                   text,
+                   data-default,
+                   containers,
+                   lifted-base,
+                   transformers-base
+  ghc-options:     -Wall
+
