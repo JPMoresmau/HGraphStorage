@@ -16,13 +16,17 @@ library
                    data-default,
                    containers,
                    lifted-base,
-                   transformers-base
+                   transformers-base,
+                   transformers,
+                   monad-control,
+                   monad-logger,
+                   resourcet
   ghc-options:     -Wall
-  other-modules:   
-                   Database.Graph.HGraphStorage.Types,
-                   Database.Graph.HGraphStorage.Constants,
-                   Database.Graph.HGraphStorage.Graph
-  exposed-modules: Database.Graph.HGraphStorage.FileOps
+  other-modules:   Database.Graph.HGraphStorage.Constants
+  exposed-modules: 
+                   Database.Graph.HGraphStorage.FileOps,
+                   Database.Graph.HGraphStorage.API,
+                   Database.Graph.HGraphStorage.Types
 
 executable HGraphStorage
   hs-source-dirs:  exe
@@ -36,6 +40,10 @@ executable HGraphStorage
                    data-default,
                    containers,
                    lifted-base,
-                   transformers-base
+                   transformers-base,
+                   transformers,
+                   monad-control,
+                   monad-logger,
+                   resourcet
   ghc-options:     -Wall
 

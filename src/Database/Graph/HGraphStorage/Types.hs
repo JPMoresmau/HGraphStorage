@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveDataTypeable, DeriveGeneric, OverloadedStrings #-}
+{-# LANGUAGE DeriveDataTypeable, DeriveGeneric, OverloadedStrings, ConstraintKinds #-}
 module Database.Graph.HGraphStorage.Types where
 
 import Control.Exception.Base
@@ -12,6 +12,13 @@ import Data.Text
 
 import GHC.Generics (Generic)
 import System.IO
+import Control.Monad.Logger (MonadLogger)
+import Control.Monad.Trans.Control ( MonadBaseControl )
+import qualified Control.Monad.Trans.Resource as R
+
+-- | put our constraints in one synonym
+type GraphUsableMonad m=(MonadBaseControl IO m, R.MonadResource m, MonadLogger m)
+
 
 type ObjectID       = Int32
 
@@ -33,8 +40,7 @@ type PropertyValueLength = Int64
 
 data Object = Object
   {
-    oId        :: ObjectID
-  , oType      :: ObjectTypeID
+    oType      :: ObjectTypeID
   , oFirstFrom :: RelationID
   , oFirstTo   :: RelationID
   , oFirstProperty :: PropertyID
@@ -43,7 +49,7 @@ data Object = Object
 instance Binary Object
 
 instance Default Object where
-  def = Object 0 0 0 0 0
+  def = Object 0 0 0 0
 
 objectSize :: Int64
 objectSize = binLength (def::Object)
@@ -65,7 +71,7 @@ data Relation = Relation
   , rToTo      :: RelationID
   , rFirstProperty :: PropertyID
   } deriving (Show,Read,Eq,Ord,Typeable,Generic)
-  
+
 instance Binary Relation
   
 instance Default Relation where
@@ -175,11 +181,17 @@ data PropertyValue =
   | PVBinary  BS.ByteString
   deriving (Show,Read,Eq,Ord,Typeable)
   
+valueType :: PropertyValue -> DataType
+valueType (PVText _) = DTText
+valueType (PVInteger _) = DTInteger
+valueType (PVBinary _) = DTBinary
+ 
 data GraphStorageException = 
     IncoherentNamePropertyTypeID PropertyTypeID PropertyTypeID
   | UnknownPropertyType PropertyTypeID
   | NoNameProperty PropertyTypeID
   | MultipleNameProperty PropertyTypeID
+  | UnknownObjectType ObjectTypeID
   deriving (Show,Read,Eq,Ord,Typeable)
   
 instance Exception GraphStorageException
