@@ -28,5 +28,9 @@ main = do
     liftIO $ print th
     fg <- createObject (GraphObject Nothing "Movie" $ DM.fromList [("name",[PVText "Forrest Gump"]),("year",[PVInteger 1990])])
     liftIO $ print fg
-    filterObjects (const True)
+    (liftIO . print) =<< filterObjects (const True)
+    fgp <- createRelation (GraphRelation Nothing th fg "Played" $ DM.fromList [("role",[PVText "Forrest Gump"])])
+    liftIO $ print fgp
+    filterRelations (const True)
+    
   print res

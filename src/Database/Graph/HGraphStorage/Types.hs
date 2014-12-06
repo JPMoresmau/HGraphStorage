@@ -192,6 +192,7 @@ data GraphStorageException =
   | NoNameProperty PropertyTypeID
   | MultipleNameProperty PropertyTypeID
   | UnknownObjectType ObjectTypeID
+  | UnknownRelationType RelationTypeID
   deriving (Show,Read,Eq,Ord,Typeable)
   
 instance Exception GraphStorageException

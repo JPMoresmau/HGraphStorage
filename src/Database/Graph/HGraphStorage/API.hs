@@ -2,15 +2,14 @@
 module Database.Graph.HGraphStorage.API where
 
 import Control.Applicative
-import Control.Monad (MonadPlus, liftM, void, join, foldM)
+import Control.Monad (MonadPlus, liftM, foldM)
 import Control.Monad.Base (MonadBase(..))
 import Control.Monad.Fix (MonadFix)
-import Control.Monad.IO.Class (MonadIO, liftIO)
+import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.Trans.Class (MonadTrans(lift))
 import Control.Monad.Trans.Control ( MonadTransControl(..), MonadBaseControl(..)
                                    , ComposeSt, defaultLiftBaseWith
                                    , defaultRestoreM )
-import Control.Monad.Trans.Reader (ReaderT(..), ask, mapReaderT)
 
 import qualified Data.Map as DM
 import qualified Data.Text as T
@@ -108,10 +107,18 @@ createObject obj = do
   hs <- getHandles
   tid <- objectType $ goType obj
   --let props = filter (not . null . snd) $ DM.toList $ goProperties obj
-  propId <- foldM addProps def $ DM.toList $ goProperties obj
+  propId <- createProperties $ goProperties obj
   nid <- write hs (goID obj) (Object tid def def propId)
   return $ obj {goID = Just nid}
   where 
+  
+ 
+createProperties 
+  :: (GraphUsableMonad m)
+  => DM.Map T.Text [PropertyValue]
+  -> GraphStorageT m PropertyID
+createProperties = foldM addProps def . DM.toList
+  where
     addProps nid (_,[]) = return nid 
     addProps nid (name,vs@(v:_)) = do
       let dt = valueType v
@@ -122,39 +129,76 @@ createObject obj = do
 
 filterObjects :: (GraphUsableMonad m) =>
                 (GraphObject -> Bool) -> GraphStorageT m [GraphObject]
-filterObjects ft = filter ft <$> (mapM popProperties =<< readAll =<< getHandles)
-  where 
-    popProperties (objId,obj) = do
-      hs <- getHandles
-      mdl <- getModel
-      let pid = oFirstProperty obj
-      ps <- readProperties hs mdl def pid
-      let otid = oType obj
-      typeName <- throwIfNothing (UnknownObjectType otid) $ DM.lookup otid $ toName $ mObjectTypes mdl
-      pmap <- 
-        DM.fromList <$>
-        (mapM propName
-          $ DM.toList $ DM.fromListWith (++) $ map (\(k,v)->(k,[v])) ps)
-      return $ GraphObject (Just objId) typeName pmap
+filterObjects ft = filter ft <$> (mapM (uncurry populateObject) =<< readAll =<< getHandles)
+  
+populateObject :: (GraphUsableMonad m) =>
+                    ObjectID -> Object -> GraphStorageT m GraphObject
+populateObject objId obj = do
+  mdl <- getModel
+  let pid = oFirstProperty obj
+  pmap <- listProperties pid
+  let otid = oType obj
+  typeName <- throwIfNothing (UnknownObjectType otid) $ DM.lookup otid $ toName $ mObjectTypes mdl
+  return $ GraphObject (Just objId) typeName pmap
+
+getObject :: (GraphUsableMonad m) =>
+                ObjectID -> GraphStorageT m GraphObject
+getObject gid = populateObject gid =<< flip readOne gid =<< getHandles
+
+
+listProperties
+  :: (GraphUsableMonad m)
+  => PropertyID
+  -> GraphStorageT m (DM.Map T.Text [PropertyValue])
+listProperties pid = do
+  hs <- getHandles
+  mdl <- getModel
+  ps <- readProperties hs mdl def pid
+  DM.fromList <$>
+    mapM propName
+      (DM.toList $ DM.fromListWith (++) $ map (\ (k, v) -> (k, [v])) ps)
+  where
     propName (p,vs) = do
       mdl <- getModel
       let ptid = pType p
       (pName,_) <- throwIfNothing (UnknownPropertyType ptid) $ DM.lookup ptid $ toName $ mPropertyTypes mdl
-      return (pName,vs)
+      return (pName,vs)   
+  
 
 
 createRelation :: (GraphUsableMonad m) =>
   GraphRelation -> GraphStorageT m GraphRelation
 createRelation rel = do
   (fromId,fromObj) <- getObjectId $ grFrom rel
+  fromTid <- objectType $ goType fromObj
   (toId,toObj) <- getObjectId $ grTo rel
-  
-  return rel{grFrom=fromObj,grTo=toObj}
+  toTid <- objectType $ goType toObj
+  rid <- relationType $ grType rel
+  propId <- createProperties $ grProperties rel
+  hs <- getHandles
+  -- TODO next, previous, links to from obj, etc...
+  nid <- write hs (grId rel) (Relation fromId fromTid toId toTid rid def def def def propId)
+  return rel{grId=Just nid,grFrom=fromObj,grTo=toObj}
   where
     getObjectId obj = case goID obj of
       Just i -> return (i,obj)
       Nothing -> getObjectId =<< createObject obj 
       
+
+filterRelations :: (GraphUsableMonad m) =>
+                (GraphRelation -> Bool) -> GraphStorageT m [GraphRelation]
+filterRelations ft = filter ft <$> (mapM popProperties =<< readAll =<< getHandles)
+  where 
+    popProperties (relId,rel) = do
+      mdl <- getModel
+      let pid = rFirstProperty rel
+      pmap <- listProperties pid
+      let rtid = rType rel
+      typeName <- throwIfNothing (UnknownRelationType rtid) $ DM.lookup rtid $ toName $ mRelationTypes mdl
+      fromObj <- getObject $ rFrom rel
+      toObj <- getObject $ rTo rel
+      return $ GraphRelation (Just relId) fromObj toObj typeName pmap
+
 
 objectType :: (GraphUsableMonad m) 
   => T.Text -> GraphStorageT m ObjectTypeID
