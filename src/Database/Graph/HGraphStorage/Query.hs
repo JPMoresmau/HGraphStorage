@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveDataTypeable, ConstraintKinds, FlexibleContexts #-}
+-- | Higher level API for querying
 module Database.Graph.HGraphStorage.Query where
 
 import Data.Default
@@ -40,14 +41,12 @@ queryStep oid rs = do
   restrictedRelTypes <- mapM relationType $ rsRelTypes rs
   restrictedObjTypes <- mapM objectType $ rsTgtTypes rs
   let filt1 = filterRels hs restrictedRelTypes restrictedObjTypes (rsTgtFilter rs)
-  froms <- do
+  froms <- 
     if rsDirection rs `elem` [OUT,BOTH]
-      then do
-        filt1 (oFirstFrom o) rFromNext rToType rTo OUT []
+      then filt1 (oFirstFrom o) rFromNext rToType rTo OUT []
       else return []
   if rsDirection rs `elem` [IN,BOTH]
-      then do
-        filt1 (oFirstTo o) rToNext rFromType rFrom IN froms
+      then filt1 (oFirstTo o) rToNext rFromType rFrom IN froms
       else return froms
   where
     isRestricted [] _ =True
@@ -57,7 +56,7 @@ queryStep oid rs = do
       | otherwise  = do
         rel <- readOne hs fid
         let next = tonext rel
-        accum2 <- if (isRestricted resRels (rType rel))  && (isRestricted resObjs (tgtType rel))
+        accum2 <- if isRestricted resRels (rType rel) &&  isRestricted resObjs (tgtType rel)
           then do
             let oid2 = tgtId rel
             obj <- getObject oid2
@@ -68,7 +67,7 @@ queryStep oid rs = do
                 pmap <- listProperties pid
                 let rtid = rType rel
                 typeName <- throwIfNothing (UnknownRelationType rtid) $ DM.lookup rtid $ toName $ mRelationTypes mdl
-                return $ (StepResult dir typeName pmap obj):accum
+                return $ StepResult dir typeName pmap obj : accum
               else return accum
           else return accum
         filterRels hs resRels resObjs filt next tonext tgtType tgtId dir accum2

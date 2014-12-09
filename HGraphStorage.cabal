@@ -2,7 +2,16 @@ name:           HGraphStorage
 version:        0.1
 cabal-version:  >=1.8
 build-type:     Simple
-author:         jpmoresmau
+author:         JP Moresmau <jp@moresmau.fr>
+maintainer:     JP Moresmau <jp@moresmau.fr>
+stability:      experimental
+category:       Database
+homepage:       https://github.com/JPMoresmau/dbIDE/tree/master/HGraphStorage
+synopsis:       Graph database stored on disk
+description:    A graph database storing its data on disk.
+copyright:      JP Moresmau 2014
+license:        BSD3
+license-file:   LICENSE
 
 library
   hs-source-dirs:  src
@@ -48,3 +57,6 @@ executable HGraphStorage
                    resourcet
   ghc-options:     -Wall
 
+source-repository head
+  type:      git
+  location:  https://github.com/JPMoresmau/dbIDE.git

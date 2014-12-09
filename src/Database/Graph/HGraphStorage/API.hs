@@ -1,8 +1,9 @@
 {-# LANGUAGE DeriveDataTypeable, StandaloneDeriving, ConstraintKinds, FlexibleInstances, MultiParamTypeClasses, TypeFamilies, UndecidableInstances, DeriveFunctor, GeneralizedNewtypeDeriving, RankNTypes, FlexibleContexts #-}
+-- | Higher level API for reading and writing
 module Database.Graph.HGraphStorage.API where
 
 import Control.Applicative
-import Control.Monad (MonadPlus, liftM, foldM)
+import Control.Monad (MonadPlus, liftM, foldM, filterM)
 import Control.Monad.Base (MonadBase(..))
 import Control.Monad.Fix (MonadFix)
 import Control.Monad.IO.Class (MonadIO)
@@ -25,13 +26,14 @@ import Data.Default (def)
 import Control.Monad.Trans.State.Lazy
 
 
+-- | State for the monad
 data GsData = GsData
   { gsHandles :: Handles
   , gsModel   :: Model
   } 
 
 
---withGraphStorage :: FilePath -> GraphStorageT m a -> m a
+-- | Run a computation with the graph storage engine, storing the data in the given directory
 withGraphStorage :: forall (m :: * -> *) a.
                       (R.MonadThrow m, R.MonadUnsafeIO m, MonadIO m,
                       MonadLogger m,
@@ -46,7 +48,7 @@ withGraphStorage dir (Gs act) = R.runResourceT $ do
 
 
 
-
+-- | Our monad transformer
 newtype GraphStorageT m a = Gs { unIs :: StateT GsData m a }
     deriving ( Functor, Applicative, Alternative, Monad
              , MonadFix, MonadPlus, MonadIO, MonadTrans
@@ -74,14 +76,14 @@ instance (MonadLogger m) => MonadLogger (GraphStorageT m) where
 data Graph = Graph [GraphObject] [GraphRelation]
   deriving (Show,Read,Eq,Ord,Typeable)
 
-
+-- | An object with a type and properties
 data GraphObject = GraphObject
   { goID         :: Maybe ObjectID
   , goType       :: T.Text
   , goProperties :: DM.Map T.Text [PropertyValue]
   } deriving (Show,Read,Eq,Ord,Typeable)
 
-
+-- | A relation between two objects, with a type and properties
 data GraphRelation = GraphRelation
   { grID         :: Maybe RelationID
   , grFrom       :: GraphObject
@@ -100,7 +102,7 @@ getHandles = gsHandles `liftM` Gs get
 getModel :: Monad m => GraphStorageT m Model
 getModel = gsModel `liftM` Gs get
 
-
+-- | Create or replace an object
 createObject :: (GraphUsableMonad m) =>
                 GraphObject -> GraphStorageT m GraphObject
 createObject obj = do
@@ -112,7 +114,7 @@ createObject obj = do
   return $ obj {goID = Just nid}
   where 
   
- 
+-- | Create properties from map, returns the first ID in the chain
 createProperties 
   :: (GraphUsableMonad m)
   => DM.Map T.Text [PropertyValue]
@@ -126,10 +128,10 @@ createProperties = foldM addProps def . DM.toList
       hs <- getHandles
       foldM (writeProperty hs ptid) nid vs
 
-
+-- | filter objects
 filterObjects :: (GraphUsableMonad m) =>
-                (GraphObject -> Bool) -> GraphStorageT m [GraphObject]
-filterObjects ft = filter ft <$> (mapM (uncurry populateObject) =<< readAll =<< getHandles)
+                (GraphObject -> GraphStorageT m Bool) -> GraphStorageT m [GraphObject]
+filterObjects ft = filterM ft =<< (mapM (uncurry populateObject) =<< readAll =<< getHandles)
   
 populateObject :: (GraphUsableMonad m) =>
                     ObjectID -> Object -> GraphStorageT m GraphObject
@@ -192,8 +194,8 @@ createRelation rel = do
       
 
 filterRelations :: (GraphUsableMonad m) =>
-                (GraphRelation -> Bool) -> GraphStorageT m [GraphRelation]
-filterRelations ft = filter ft <$> (mapM popProperties =<< readAll =<< getHandles)
+                (GraphRelation -> GraphStorageT m Bool) -> GraphStorageT m [GraphRelation]
+filterRelations ft = filterM ft =<< (mapM popProperties =<< readAll =<< getHandles)
   where 
     popProperties (relId,rel) = do
       mdl <- getModel
