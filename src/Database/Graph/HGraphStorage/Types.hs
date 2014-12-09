@@ -65,17 +65,15 @@ data Relation = Relation
   , rTo        :: ObjectID
   , rToType    :: ObjectTypeID
   , rType      :: RelationTypeID
-  , rFromFrom  :: RelationID
-  , rFromTo    :: RelationID
-  , rToFrom    :: RelationID
-  , rToTo      :: RelationID
+  , rFromNext  :: RelationID
+  , rToNext    :: RelationID
   , rFirstProperty :: PropertyID
   } deriving (Show,Read,Eq,Ord,Typeable,Generic)
 
 instance Binary Relation
   
 instance Default Relation where
-  def  = Relation 0 0 0 0 0 0 0 0 0 0
+  def  = Relation 0 0 0 0 0 0 0 0
   
 relationSize :: Int64
 relationSize =  binLength (def::Relation)

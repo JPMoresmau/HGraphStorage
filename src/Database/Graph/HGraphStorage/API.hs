@@ -83,7 +83,7 @@ data GraphObject = GraphObject
 
 
 data GraphRelation = GraphRelation
-  { grId         :: Maybe RelationID
+  { grID         :: Maybe RelationID
   , grFrom       :: GraphObject
   , grTo         :: GraphObject
   , grType       :: T.Text
@@ -146,6 +146,7 @@ getObject :: (GraphUsableMonad m) =>
 getObject gid = populateObject gid =<< flip readOne gid =<< getHandles
 
 
+
 listProperties
   :: (GraphUsableMonad m)
   => PropertyID
@@ -176,9 +177,14 @@ createRelation rel = do
   rid <- relationType $ grType rel
   propId <- createProperties $ grProperties rel
   hs <- getHandles
+  fromTObj <- readOne hs fromId
+  toTObj <- readOne hs toId
   -- TODO next, previous, links to from obj, etc...
-  nid <- write hs (grId rel) (Relation fromId fromTid toId toTid rid def def def def propId)
-  return rel{grId=Just nid,grFrom=fromObj,grTo=toObj}
+  nid <- write hs (grID rel) (Relation fromId fromTid toId toTid rid (oFirstFrom fromTObj) (oFirstTo toTObj) propId)
+  _ <- write hs (Just fromId) fromTObj{oFirstFrom=nid}
+  _ <- write hs (Just toId) toTObj{oFirstTo=nid}
+  
+  return rel{grID=Just nid,grFrom=fromObj,grTo=toObj}
   where
     getObjectId obj = case goID obj of
       Just i -> return (i,obj)

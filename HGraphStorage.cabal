@@ -26,7 +26,8 @@ library
   exposed-modules: 
                    Database.Graph.HGraphStorage.FileOps,
                    Database.Graph.HGraphStorage.API,
-                   Database.Graph.HGraphStorage.Types
+                   Database.Graph.HGraphStorage.Types,
+                   Database.Graph.HGraphStorage.Query
 
 executable HGraphStorage
   hs-source-dirs:  exe
