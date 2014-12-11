@@ -3,7 +3,7 @@
 module Database.Graph.HGraphStorage.API where
 
 import Control.Applicative
-import Control.Monad (MonadPlus, liftM, foldM, filterM)
+import Control.Monad (MonadPlus, liftM, foldM, filterM, void)
 import Control.Monad.Base (MonadBase(..))
 import Control.Monad.Fix (MonadFix)
 import Control.Monad.IO.Class (MonadIO)
@@ -133,6 +133,7 @@ filterObjects :: (GraphUsableMonad m) =>
                 (GraphObject -> GraphStorageT m Bool) -> GraphStorageT m [GraphObject]
 filterObjects ft = filterM ft =<< (mapM (uncurry populateObject) =<< readAll =<< getHandles)
   
+-- | (Internal) Fill an object with its properties
 populateObject :: (GraphUsableMonad m) =>
                     ObjectID -> Object -> GraphStorageT m GraphObject
 populateObject objId obj = do
@@ -148,7 +149,7 @@ getObject :: (GraphUsableMonad m) =>
 getObject gid = populateObject gid =<< flip readOne gid =<< getHandles
 
 
-
+-- | (Internal) Build a property map by reading the property list
 listProperties
   :: (GraphUsableMonad m)
   => PropertyID
@@ -168,7 +169,7 @@ listProperties pid = do
       return (pName,vs)   
   
 
-
+-- | Create a relation between two objects
 createRelation :: (GraphUsableMonad m) =>
   GraphRelation -> GraphStorageT m GraphRelation
 createRelation rel = do
@@ -192,6 +193,7 @@ createRelation rel = do
       Nothing -> getObjectId =<< createObject obj 
       
 
+-- | list relations matchinf a filter
 filterRelations :: (GraphUsableMonad m) =>
                 (GraphRelation -> GraphStorageT m Bool) -> GraphStorageT m [GraphRelation]
 filterRelations ft = filterM ft =<< (mapM popProperties =<< readAll =<< getHandles)
@@ -207,6 +209,97 @@ filterRelations ft = filterM ft =<< (mapM popProperties =<< readAll =<< getHandl
       return $ GraphRelation (Just relId) fromObj toObj typeName pmap
 
 
+-- | Delete a relation from the DB.
+deleteRelation 
+  :: (GraphUsableMonad m) 
+  => RelationID
+  -> GraphStorageT m ()
+deleteRelation rid =
+ void $ deleteRelation' rid True True
+
+-- | (Internal) Delete a relation from the DB.
+deleteRelation'
+  :: (GraphUsableMonad m) 
+  => RelationID
+  -> Bool -- ^ Should we clean the origin object relation list? 
+  -> Bool -- ^ Should we clean the target object relation list?
+  -> GraphStorageT m [RelationID] -- ^ The next ids in the chain we didn't clean
+deleteRelation' rid cleanFrom cleanTo = do
+  hs <- getHandles
+  rel <- readOne hs rid
+  -- TODO put ID on free list
+  _ <- write hs (Just rid) (def::Relation)
+  deleteProperties hs $ rFirstProperty rel
+  
+  let nextFrom = rFromNext rel
+  ns1 <- if cleanFrom 
+    then do
+      let fromId = rFrom rel
+      fromO <- readOne hs fromId
+      let fstFromId = oFirstFrom fromO
+      if fstFromId == rid
+        then void $ write hs (Just fromId) fromO{oFirstFrom = nextFrom}
+        else fixChain hs fstFromId rFromNext (\r -> r{rFromNext = nextFrom})
+      return []
+    else return [nextFrom]
+  
+  let nextTo = rToNext rel
+  ns2 <- if cleanTo 
+    then do
+      let toId = rTo rel
+      toO <- readOne hs toId
+      let fstToId = oFirstTo toO
+      if fstToId == rid
+        then void $ write hs (Just toId) toO{oFirstTo = nextTo}
+        else fixChain hs fstToId rToNext (\r -> r{rToNext = nextTo})
+      return []
+    else return [nextTo] 
+  return $ filter (def /=) $ ns1 ++ ns2
+  where
+    fixChain _ crid _ _ | crid == def = return () 
+    fixChain hs crid getNext setNext = do
+      rel <- readOne hs crid
+      let nid = getNext rel
+      if nid == rid
+        then void $ write hs (Just crid) $ setNext rel  
+        else fixChain hs nid getNext setNext
+
+-- | Delete an object
+deleteObject 
+  :: (GraphUsableMonad m) 
+  => ObjectID
+  -> GraphStorageT m ()
+deleteObject oid = do
+  hs <- getHandles
+  obj <- readOne hs oid
+  -- TODO put ID on free list
+  _ <- write hs (Just oid) (def::Object)
+  cleanRef False True $ oFirstFrom obj
+  cleanRef True False $ oFirstTo obj
+  deleteProperties hs $ oFirstProperty obj
+  
+  where
+    cleanRef _ _ rid | rid == def = return ()
+    cleanRef cleanFrom cleanTo rid = do
+      rids <- deleteRelation' rid cleanFrom cleanTo
+      mapM_ (cleanRef  cleanFrom cleanTo) rids
+  
+-- | (Internal) Delete all properties in the list
+deleteProperties
+  :: (GraphUsableMonad m) 
+  => Handles
+  -> PropertyID
+  -> GraphStorageT m ()
+deleteProperties _ pid | pid == def = return ()
+deleteProperties hs pip = do
+  p <- readOne hs pip
+  let next = pNext p
+  -- TODO put ID on free list
+  _ <- write hs (Just pip) (def::Property)
+  -- TODO what about reclaiming the space of values?
+  deleteProperties hs next
+
+-- | (Internal) retrieve an object type id from its name (creating it if need be)
 objectType :: (GraphUsableMonad m) 
   => T.Text -> GraphStorageT m ObjectTypeID
 objectType typeName  = fetchType mObjectTypes
@@ -214,6 +307,7 @@ objectType typeName  = fetchType mObjectTypes
   typeName typeName
   ObjectType
 
+-- | (Internal) retrieve a property type id from its name and data type (creating it if need be)
 propertyType :: (GraphUsableMonad m) 
   => (T.Text,DataType) -> GraphStorageT m PropertyTypeID
 propertyType t@(propName,dt) = fetchType mPropertyTypes
@@ -221,6 +315,7 @@ propertyType t@(propName,dt) = fetchType mPropertyTypes
   t propName
   (PropertyType $ dataTypeID dt)
 
+-- | (Internal) retrieve an relation type id from its name (creating it if need be)
 relationType :: (GraphUsableMonad m) 
   => T.Text -> GraphStorageT m RelationTypeID
 relationType relationName = fetchType mRelationTypes
@@ -228,7 +323,7 @@ relationType relationName = fetchType mRelationTypes
   relationName relationName
   RelationType
 
-
+-- | (Internal) Fetch type helper
 fetchType :: (GraphUsableMonad m, Ord k, GraphIdSerializable i v)
   => (Model -> Lookup i k)
   -> (Model -> Lookup i k -> Model)

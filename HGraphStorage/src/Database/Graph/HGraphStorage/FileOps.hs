@@ -1,4 +1,4 @@
-{-# LANGUAGE RecordWildCards, MultiParamTypeClasses, TypeSynonymInstances,OverloadedStrings, FlexibleContexts, ConstraintKinds  #-}
+{-# LANGUAGE RecordWildCards, MultiParamTypeClasses, TypeSynonymInstances,OverloadedStrings, FlexibleContexts, ConstraintKinds, ExplicitForAll  #-}
 module Database.Graph.HGraphStorage.FileOps where
 
 import Control.Applicative
