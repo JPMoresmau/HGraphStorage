@@ -14,8 +14,8 @@ license:        BSD3
 license-file:   LICENSE
 
 library
-  hs-source-dirs:  src
-  build-depends:   
+  hs-source-dirs:   src
+  build-depends:    
                    base >= 4,
                    binary,
                    filepath,
@@ -30,9 +30,9 @@ library
                    monad-control,
                    monad-logger,
                    resourcet
-  ghc-options:     -Wall
-  other-modules:   Database.Graph.HGraphStorage.Constants
-  exposed-modules: 
+  ghc-options:      -Wall
+  other-modules:    Database.Graph.HGraphStorage.Constants
+  exposed-modules:  
                    Database.Graph.HGraphStorage.FileOps,
                    Database.Graph.HGraphStorage.API,
                    Database.Graph.HGraphStorage.Types,
@@ -60,3 +60,29 @@ executable HGraphStorage
 source-repository head
   type:      git
   location:  https://github.com/JPMoresmau/dbIDE.git
+
+test-suite hgraphstorage-test
+  type:            exitcode-stdio-1.0
+  main-is:         hgraphstorage-test.hs
+  ghc-options:     -Wall -rtsopts
+  build-depends:   
+                   base >= 4, tasty > 0.10, tasty-hunit, HUnit, tasty-quickcheck, QuickCheck,tasty-ant-xml,
+                   HGraphStorage,
+                   filepath,
+                   directory,
+                   bytestring,
+                   text,
+                   data-default,
+                   containers,
+                   lifted-base,
+                   transformers-base,
+                   transformers,
+                   monad-control,
+                   monad-logger,
+                   resourcet
+  other-modules:   
+                  Database.Graph.HGraphStorage.APITest,
+                  Database.Graph.HGraphStorage.QueryTest,
+                  Database.Graph.HGraphStorage.Utils
+  hs-source-dirs:  test
+

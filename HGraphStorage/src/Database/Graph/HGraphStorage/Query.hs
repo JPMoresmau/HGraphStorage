@@ -26,7 +26,8 @@ instance Default RelationStep where
   def = RelationStep [] OUT [] (const True)
 
 data StepResult = StepResult
-  { srDirection :: RelationDir
+  { srRelationID :: RelationID
+  , srDirection  :: RelationDir
   , srType       :: T.Text
   , srProperties :: DM.Map T.Text [PropertyValue]
   , srObject     :: GraphObject
@@ -67,7 +68,7 @@ queryStep oid rs = do
                 pmap <- listProperties pid
                 let rtid = rType rel
                 typeName <- throwIfNothing (UnknownRelationType rtid) $ DM.lookup rtid $ toName $ mRelationTypes mdl
-                return $ StepResult dir typeName pmap obj : accum
+                return $ StepResult fid dir typeName pmap obj : accum
               else return accum
           else return accum
         filterRels hs resRels resObjs filt next tonext tgtType tgtId dir accum2

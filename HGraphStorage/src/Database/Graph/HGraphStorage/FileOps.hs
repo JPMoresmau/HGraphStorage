@@ -58,8 +58,6 @@ readModel :: (GraphUsableMonad m)
   => Handles -> m Model
 readModel hs = do
   let defMdl = def
-  -- ots <- readAll hs
-  --rts <- readAll hs
   pts <- readAll hs
   when (null pts) $ do
     let t = "name"
@@ -70,18 +68,28 @@ readModel hs = do
       hSeek (hPropertyValues hs) AbsoluteSeek 0
       BS.hPut (hPropertyValues hs) t
       return ()
+  ots <- readAll hs
+  rts <- readAll hs
   mdlWithProps <- foldM addProp defMdl pts 
-  -- TODO object and relation types!
-  return mdlWithProps
+  mdlWithObjs <- foldM addOType mdlWithProps ots
+  foldM addRType mdlWithObjs rts
   where
-    addProp mdl (ptId,pt) = do
-      pvs <- readProperties hs mdl namePropertyID (ptFirstProperty pt)
+    addProp mdl (ptId,pt) = addN mdl (ptFirstProperty pt) ptId $ \name ->
+        return mdl{mPropertyTypes = addToLookup ptId (name,dataType $ ptDataType pt) $ mPropertyTypes mdl}
+
+    addOType mdl (otId,ot) = addN mdl (otFirstProperty ot) otId $ \name ->
+        return mdl {mObjectTypes = addToLookup otId name $ mObjectTypes mdl}
+        
+    addRType mdl (rtId,rt) = addN mdl (rtFirstProperty rt) rtId $ \name ->
+        return mdl {mRelationTypes = addToLookup rtId name $ mRelationTypes mdl}
+
+    addN mdl pId tId f = do
+      pvs <- readProperties hs mdl namePropertyID pId
       case pvs of
-        [(_,PVText name)] -> return mdl {mPropertyTypes = addToLookup ptId (name,dataType $ ptDataType pt) $ mPropertyTypes mdl}
-        [] -> throwIO $ NoNameProperty ptId
-        _ -> throwIO $ MultipleNameProperty ptId
-
-
+        [(_,PVText name)] -> f name
+        [] -> throwIO $ NoNameProperty tId
+        _ -> throwIO $ MultipleNameProperty tId
+        
 -- | Generic write operation: write the given binary using the given ID and record size
 -- if no id, we write at then end
 -- otherwise we always ensure that we write at the proper offset, which is why we have fixed length records

@@ -35,7 +35,7 @@ data GsData = GsData
 
 -- | Run a computation with the graph storage engine, storing the data in the given directory
 withGraphStorage :: forall (m :: * -> *) a.
-                      (R.MonadThrow m, R.MonadUnsafeIO m, MonadIO m,
+                      (R.MonadThrow m, MonadIO m,
                       MonadLogger m,
                        MonadBaseControl IO m) =>
                       FilePath -> GraphStorageT (R.ResourceT m) a -> m a
@@ -181,7 +181,6 @@ createRelation rel = do
   hs <- getHandles
   fromTObj <- readOne hs fromId
   toTObj <- readOne hs toId
-  -- TODO next, previous, links to from obj, etc...
   nid <- write hs (grID rel) (Relation fromId fromTid toId toTid rid (oFirstFrom fromTObj) (oFirstTo toTObj) propId)
   _ <- write hs (Just fromId) fromTObj{oFirstFrom=nid}
   _ <- write hs (Just toId) toTObj{oFirstTo=nid}
