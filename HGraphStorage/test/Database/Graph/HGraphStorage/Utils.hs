@@ -20,6 +20,5 @@ withTempDB f = do
   ex <- doesDirectoryExist dir
   when ex $ do
     cnts <- getDirectoryContents dir
-    mapM_ removeFile =<< (filterM doesFileExist $ map (dir </>) cnts)
-  runStderrLoggingT $ withGraphStorage dir $ do
-    f
+    mapM_ removeFile =<< filterM doesFileExist (map (dir </>) cnts)
+  runStderrLoggingT $ withGraphStorage dir f
