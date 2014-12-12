@@ -1,4 +1,4 @@
-{-# LANGUAGE RecordWildCards, MultiParamTypeClasses, TypeSynonymInstances,OverloadedStrings, FlexibleContexts, ConstraintKinds, ExplicitForAll  #-}
+{-# LANGUAGE RecordWildCards, MultiParamTypeClasses, TypeSynonymInstances,OverloadedStrings, FlexibleContexts, ConstraintKinds, ExplicitForAll, ScopedTypeVariables  #-}
 module Database.Graph.HGraphStorage.FileOps where
 
 import Control.Applicative
@@ -6,6 +6,7 @@ import Control.Exception.Base (Exception)
 
 import Data.Binary
 import Data.Default
+import Data.Traversable
 import System.FilePath
 import qualified Data.Map as DM
 
@@ -19,10 +20,11 @@ import qualified Data.ByteString.Lazy  as BS
 import Data.Int
 import Data.ByteString.Lazy (toStrict, fromStrict)
 import Data.Text.Encoding (decodeUtf8, encodeUtf8)
-import Control.Monad (foldM, when)
+import Control.Monad (foldM, when, join)
 import Control.Monad.Base (MonadBase)
 import Control.Exception.Lifted (throwIO)
 import Control.Monad.IO.Class (liftIO)
+import Database.Graph.HGraphStorage.FreeList
 
 -- | Open all the file handles
 open :: FilePath -> IO Handles
@@ -30,10 +32,13 @@ open dir = do
   createDirectoryIfMissing True dir
   Handles 
     <$> getHandle objectFile
+    <*> getFreeList objectFile (def::ObjectID)
     <*> getHandle objectTypeFile
     <*> getHandle relationFile
+    <*> getFreeList relationFile (def::RelationID)
     <*> getHandle relationTypeFile
     <*> getHandle propertyFile
+    <*> getFreeList propertyFile (def::PropertyID)
     <*> getHandle propertyTypeFile
     <*> getHandle propertyValuesFile
   where
@@ -41,6 +46,12 @@ open dir = do
     getHandle name = do
       let f = dir </> name
       openBinaryFile f ReadWriteMode
+    getFreeList :: (Binary a) => FilePath -> a -> IO (FreeList a)
+    getFreeList name d = do
+      let f = dir </> freePrefix ++ name
+      h<- openBinaryFile f ReadWriteMode
+      initFreeList (fromIntegral $ binLength d) h
+      
 
 -- | Close all the file handles
 close :: Handles -> IO ()
@@ -94,19 +105,22 @@ readModel hs = do
 -- if no id, we write at then end
 -- otherwise we always ensure that we write at the proper offset, which is why we have fixed length records
 writeGeneric :: (GraphUsableMonad m)
-  => (Integral a, Binary b) => Handle -> Int64 -> Maybe a -> b -> m a
-writeGeneric h sz (Just a) b = 
+  => (Integral a,Binary a,Default a, Binary b) => Handle -> Maybe (FreeList a) -> Int64 -> Maybe a -> b -> m a
+writeGeneric h _ sz (Just a) b = 
   liftIO $ do 
     hSeek h AbsoluteSeek (toInteger (a - 1) * toInteger sz)
     BS.hPut h $ encode b 
     return a
-writeGeneric h sz Nothing b = 
-  liftIO $ do
-    hSeek h SeekFromEnd 0
-    allsz <- hTell h
-    let a=div allsz $ toInteger sz 
-    BS.hPut h $ encode b 
-    return $ fromInteger a + 1
+writeGeneric h mf sz Nothing b = do
+  mid <- liftIO $ join <$> for mf getFromFreeList
+  case mid of
+    Just i  -> writeGeneric h mf sz (Just i) b
+    Nothing -> liftIO $ do
+      hSeek h SeekFromEnd 0
+      allsz <- hTell h
+      let a=div allsz $ toInteger sz 
+      BS.hPut h $ encode b 
+      return $ fromInteger a + 1
 
 -- | Read a binary with a given ID from the given handle
 readGeneric :: (GraphUsableMonad m)
@@ -194,37 +208,37 @@ class (Integral a, Binary b) => GraphIdSerializable a b where
 
 -- | Serialization methods for ObjectID + Object
 instance GraphIdSerializable ObjectID Object where
-  write hs = writeGeneric (hObjects hs) objectSize
+  write hs = writeGeneric (hObjects hs) (Just $ hObjectFree hs) objectSize
   readOne hs  = readGeneric (hObjects hs) objectSize
   readAll hs = readAllGeneric(hObjects hs) objectSize
 
 -- | Serialization methods for RelationID + Relation
 instance GraphIdSerializable RelationID Relation where
-  write hs = writeGeneric (hRelations hs) relationSize
+  write hs = writeGeneric (hRelations hs) (Just $ hRelationFree hs)  relationSize
   readOne hs  = readGeneric (hRelations hs) relationSize
   readAll hs = readAllGeneric(hRelations hs) relationSize
   
 -- | Serialization methods for PropertyID + Property
 instance GraphIdSerializable PropertyID Property where
-  write hs = writeGeneric (hProperties hs) propertySize
+  write hs = writeGeneric (hProperties hs) (Just $ hPropertyFree hs)  propertySize
   readOne hs  = readGeneric (hProperties hs) propertySize
   readAll hs = readAllGeneric(hProperties hs) propertySize
 
 -- | Serialization methods for PropertyTypeID + PropertyType  
 instance GraphIdSerializable PropertyTypeID PropertyType where
-  write hs = writeGeneric (hPropertyTypes hs) propertyTypeSize
+  write hs = writeGeneric (hPropertyTypes hs) Nothing propertyTypeSize
   readOne hs  = readGeneric (hPropertyTypes hs) propertyTypeSize
   readAll hs = readAllGeneric(hPropertyTypes hs) propertyTypeSize
 
 -- | Serialization methods for ObjectTypeID + ObjectType  
 instance GraphIdSerializable ObjectTypeID ObjectType where
-  write hs = writeGeneric (hObjectTypes hs) objectTypeSize
+  write hs = writeGeneric (hObjectTypes hs) Nothing objectTypeSize
   readOne hs  = readGeneric (hObjectTypes hs) objectTypeSize
   readAll hs = readAllGeneric(hObjectTypes hs) objectTypeSize
 
 -- | Serialization methods for RelationTypeID + RelationType  
 instance GraphIdSerializable RelationTypeID RelationType where
-  write hs = writeGeneric (hRelationTypes hs) relationTypeSize
+  write hs = writeGeneric (hRelationTypes hs) Nothing relationTypeSize
   readOne hs  = readGeneric (hRelationTypes hs) relationTypeSize
   readAll hs = readAllGeneric(hRelationTypes hs) relationTypeSize
  

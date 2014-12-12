@@ -18,6 +18,7 @@ import Control.Monad.Trans.Control ( MonadBaseControl )
 import qualified Control.Monad.Trans.Resource as R
 
 import Database.Graph.HGraphStorage.Constants
+import Database.Graph.HGraphStorage.FreeList
 
 -- | put our constraints in one synonym
 type GraphUsableMonad m=(MonadBaseControl IO m, R.MonadResource m, MonadLogger m)
@@ -167,10 +168,13 @@ relationTypeSize = binLength (def::RelationType)
 -- | Handles to the various files
 data Handles = Handles 
   { hObjects        :: Handle
+  , hObjectFree     :: FreeList ObjectID
   , hObjectTypes    :: Handle
   , hRelations      :: Handle
+  , hRelationFree   :: FreeList ObjectID
   , hRelationTypes  :: Handle
   , hProperties     :: Handle
+  , hPropertyFree   :: FreeList ObjectID
   , hPropertyTypes  :: Handle
   , hPropertyValues :: Handle
   }

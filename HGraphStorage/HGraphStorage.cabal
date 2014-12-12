@@ -36,7 +36,8 @@ library
                    Database.Graph.HGraphStorage.FileOps,
                    Database.Graph.HGraphStorage.API,
                    Database.Graph.HGraphStorage.Types,
-                   Database.Graph.HGraphStorage.Query
+                   Database.Graph.HGraphStorage.Query,
+                   Database.Graph.HGraphStorage.FreeList
 
 executable HGraphStorage
   hs-source-dirs:  exe
@@ -83,6 +84,7 @@ test-suite hgraphstorage-test
   other-modules:   
                   Database.Graph.HGraphStorage.APITest,
                   Database.Graph.HGraphStorage.QueryTest,
-                  Database.Graph.HGraphStorage.Utils
+                  Database.Graph.HGraphStorage.Utils,
+                  Database.Graph.HGraphStorage.FreeListTest
   hs-source-dirs:  test
 

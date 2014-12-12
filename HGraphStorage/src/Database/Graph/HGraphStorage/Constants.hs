@@ -35,3 +35,7 @@ propertyTypeFile = "propertytypes.db"
 -- | The name of the property value file
 propertyValuesFile :: FilePath
 propertyValuesFile = "propertyvalues.db"
+
+-- | Prefix for free list files
+freePrefix :: FilePath
+freePrefix = "free-"

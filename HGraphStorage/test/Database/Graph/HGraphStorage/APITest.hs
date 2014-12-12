@@ -105,6 +105,13 @@ apiTests = testGroup "API tests"
           0 @=? length qs7
           1 @=? length qs8
           (sr8_1 `elem` qs8) @? "sr8_1 not in in list!"
+   , testCase "Delete objects recovers id" $
+      withTempDB $ do
+        th <- createObject (GraphObject Nothing "Actor" $ DM.fromList [("name",[PVText "Tom Hanks"]),("age",[PVInteger 60])])
+        deleteObject $ fromJust $ goID th
+        fg <- createObject (GraphObject Nothing "Movie" $ DM.fromList [("name",[PVText "Forrest Gump"]),("year",[PVInteger 1990])])
+        liftIO $
+          goID th @=? goID fg
    ]
    
 checkModel :: GraphStorageT

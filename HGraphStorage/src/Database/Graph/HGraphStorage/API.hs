@@ -24,6 +24,7 @@ import Database.Graph.HGraphStorage.FileOps
 import Database.Graph.HGraphStorage.Types
 import Data.Default (def)
 import Control.Monad.Trans.State.Lazy
+import Database.Graph.HGraphStorage.FreeList (addToFreeList)
 
 
 -- | State for the monad
@@ -227,8 +228,8 @@ deleteRelation'
 deleteRelation' rid cleanFrom cleanTo = do
   hs <- getHandles
   rel <- readOne hs rid
-  -- TODO put ID on free list
   _ <- write hs (Just rid) (def::Relation)
+  addToFreeList rid (hRelationFree hs)
   deleteProperties hs $ rFirstProperty rel
   
   let nextFrom = rFromNext rel
@@ -272,8 +273,8 @@ deleteObject
 deleteObject oid = do
   hs <- getHandles
   obj <- readOne hs oid
-  -- TODO put ID on free list
   _ <- write hs (Just oid) (def::Object)
+  addToFreeList oid (hObjectFree hs)
   cleanRef False True $ oFirstFrom obj
   cleanRef True False $ oFirstTo obj
   deleteProperties hs $ oFirstProperty obj
@@ -291,11 +292,11 @@ deleteProperties
   -> PropertyID
   -> GraphStorageT m ()
 deleteProperties _ pid | pid == def = return ()
-deleteProperties hs pip = do
-  p <- readOne hs pip
+deleteProperties hs pid = do
+  p <- readOne hs pid
   let next = pNext p
-  -- TODO put ID on free list
-  _ <- write hs (Just pip) (def::Property)
+  _ <- write hs (Just pid) (def::Property)
+  addToFreeList pid (hPropertyFree hs)
   -- TODO what about reclaiming the space of values?
   deleteProperties hs next
 
