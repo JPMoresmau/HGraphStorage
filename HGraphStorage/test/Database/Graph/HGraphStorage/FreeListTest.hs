@@ -15,7 +15,7 @@ freeListTests = testGroup "Free List tests"
   [ testCase "Free List ending empty" $
      withTempFile $ \f -> do
       h <- openBinaryFile f ReadWriteMode
-      (fl::FreeList Int8) <- initFreeList 1 h
+      (fl::FreeList Int8) <- initFreeList 1 h (return ())
       m1 <- getFromFreeList fl
       m1 @?= Nothing
       addToFreeList 3 fl
@@ -34,7 +34,7 @@ freeListTests = testGroup "Free List tests"
   , testCase "Free List ending with data" $
      withTempFile $ \f -> do
       h <- openBinaryFile f ReadWriteMode
-      (fl::FreeList Int8) <- initFreeList 1 h
+      (fl::FreeList Int8) <- initFreeList 1 h (return ())
       m1 <- getFromFreeList fl
       m1 @?= Nothing
       addToFreeList 3 fl
