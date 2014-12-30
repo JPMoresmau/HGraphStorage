@@ -50,11 +50,10 @@ open dir = do
     getFreeList name d = do
       let f = dir </> freePrefix ++ name
       h<- openBinaryFile f ReadWriteMode
-      let onClose = do
+      initFreeList (fromIntegral $ binLength d) h (do
           ex <- doesFileExist f
-          when ex $ removeFile f 
-      initFreeList (fromIntegral $ binLength d) h onClose
-      
+          when ex $ removeFile f)
+
 
 -- | Close all the file handles
 close :: Handles -> IO ()
