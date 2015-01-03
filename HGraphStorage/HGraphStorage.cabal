@@ -37,7 +37,8 @@ library
                    Database.Graph.HGraphStorage.API,
                    Database.Graph.HGraphStorage.Types,
                    Database.Graph.HGraphStorage.Query,
-                   Database.Graph.HGraphStorage.FreeList
+                   Database.Graph.HGraphStorage.FreeList,
+                   Database.Graph.HGraphStorage.Index
 
 executable HGraphStorage
   hs-source-dirs:  exe
@@ -85,6 +86,14 @@ test-suite hgraphstorage-test
                   Database.Graph.HGraphStorage.APITest,
                   Database.Graph.HGraphStorage.QueryTest,
                   Database.Graph.HGraphStorage.Utils,
-                  Database.Graph.HGraphStorage.FreeListTest
+                  Database.Graph.HGraphStorage.FreeListTest,
+                  Database.Graph.HGraphStorage.IndexTest
   hs-source-dirs:  test
+
+benchmark HGraphStorage-bench
+  type:            exitcode-stdio-1.0
+  build-depends:   base >= 4,HGraphStorage
+  hs-source-dirs:  perf
+  ghc-options:     -Wall -rtsopts
+  main-is:         Main.hs
 
