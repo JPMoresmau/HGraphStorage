@@ -19,7 +19,7 @@ data RelationStep = RelationStep
   { rsRelTypes  :: [T.Text]
   , rsDirection :: RelationDir
   , rsTgtTypes  :: [T.Text]
-  , rsTgtFilter :: GraphObject -> Bool
+  , rsTgtFilter :: GraphObject ObjectID -> Bool
   } deriving (Typeable)
 
 instance Default RelationStep where
@@ -30,7 +30,7 @@ data StepResult = StepResult
   , srDirection  :: RelationDir
   , srType       :: T.Text
   , srProperties :: DM.Map T.Text [PropertyValue]
-  , srObject     :: GraphObject
+  , srObject     :: GraphObject ObjectID
   } deriving (Show,Read,Eq,Ord,Typeable)
 
 queryStep 

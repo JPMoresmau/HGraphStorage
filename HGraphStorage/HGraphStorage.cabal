@@ -92,8 +92,24 @@ test-suite hgraphstorage-test
 
 benchmark HGraphStorage-bench
   type:            exitcode-stdio-1.0
-  build-depends:   base >= 4,HGraphStorage
+  build-depends:   
+                   base >= 4,HGraphStorage,
+                   bytestring,
+                   zlib ,
+                   tar,
+                   directory,
+                   filepath,
+                   Cabal,
+                   containers,
+                   monad-logger,
+                   resourcet,
+                   text,
+                   criterion,
+                   bytestring,
+                   binary,
+                   text-binary
   hs-source-dirs:  perf
   ghc-options:     -Wall -rtsopts
   main-is:         Main.hs
+  other-modules:   Database.Graph.HGraphStorage.HackageTest
 

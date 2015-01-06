@@ -31,8 +31,6 @@ apiTests = testGroup "API tests"
         fg <- createObject (GraphObject Nothing "Movie" $ DM.fromList [("name",[PVText "Forrest Gump"]),("year",[PVInteger 1990])])
         objs <- filterObjects (return . const True)
         liftIO $ do
-          isJust (goID th) @? "th has no ID!"
-          isJust (goID fg) @? "fg has no ID!"
           2 @=? length objs
           (th `elem` objs) @? "th not in list!"
           (fg `elem` objs) @? "fg not in list!"
@@ -41,13 +39,11 @@ apiTests = testGroup "API tests"
       withTempDB $ do
         th <- createObject (GraphObject Nothing "Actor" $ DM.fromList [("name",[PVText "Tom Hanks"]),("age",[PVInteger 60])])
         fg <- createObject (GraphObject Nothing "Movie" $ DM.fromList [("name",[PVText "Forrest Gump"]),("year",[PVInteger 1990])])
-        fgp <- createRelation (GraphRelation Nothing th fg "Played" $ DM.fromList [("role",[PVText "Forrest Gump"])])
+        fgp <- createRelation' (GraphRelation Nothing th fg "Played" $ DM.fromList [("role",[PVText "Forrest Gump"])])
         ss <- createObject (GraphObject Nothing "Movie" $ DM.fromList [("name",[PVText "Sleepless in Seattle"]),("year",[PVInteger 1990])])
-        ssp <- createRelation (GraphRelation Nothing th ss "Played" $ DM.fromList [("role",[PVText "Sam Baldwin"])])
+        ssp <- createRelation' (GraphRelation Nothing th ss "Played" $ DM.fromList [("role",[PVText "Sam Baldwin"])])
         rels <- filterRelations (return . const True)
         liftIO $ do
-          isJust (grID fgp) @? "fgp has no ID!"
-          isJust (grID ssp) @? "ssp has no ID!"
           2 @=? length rels
           (fgp `elem` rels) @? "fgp not in list!"
           (ssp `elem` rels) @? "ssp not in list!"
@@ -59,10 +55,10 @@ apiTests = testGroup "API tests"
       withTempDB $ do
         th <- createObject (GraphObject Nothing "Actor" $ DM.fromList [("name",[PVText "Tom Hanks"]),("age",[PVInteger 60])])
         fg <- createObject (GraphObject Nothing "Movie" $ DM.fromList [("name",[PVText "Forrest Gump"]),("year",[PVInteger 1990])])
-        _ <- createRelation (GraphRelation Nothing th fg "Played" $ DM.fromList [("role",[PVText "Forrest Gump"])])
+        _ <- createRelation' (GraphRelation Nothing th fg "Played" $ DM.fromList [("role",[PVText "Forrest Gump"])])
         ss <- createObject (GraphObject Nothing "Movie" $ DM.fromList [("name",[PVText "Sleepless in Seattle"]),("year",[PVInteger 1990])])
-        _ <- createRelation (GraphRelation Nothing th ss "Played" $ DM.fromList [("role",[PVText "Sam Baldwin"])])
-        deleteObject $ fromJust $ goID th
+        _ <- createRelation' (GraphRelation Nothing th ss "Played" $ DM.fromList [("role",[PVText "Sam Baldwin"])])
+        deleteObject $ goID th
         objs <- filterObjects (return . const True)
         rels <- filterRelations (return . const True)
         liftIO $ do
@@ -73,25 +69,25 @@ apiTests = testGroup "API tests"
       withTempDB $ do
         th <- createObject (GraphObject Nothing "Actor" $ DM.fromList [("name",[PVText "Tom Hanks"]),("age",[PVInteger 60])])
         fg <- createObject (GraphObject Nothing "Movie" $ DM.fromList [("name",[PVText "Forrest Gump"]),("year",[PVInteger 1990])])
-        fgp <- createRelation (GraphRelation Nothing th fg "Played" $ DM.fromList [("role",[PVText "Forrest Gump"])])
+        fgp <- createRelation' (GraphRelation Nothing th fg "Played" $ DM.fromList [("role",[PVText "Forrest Gump"])])
         ss <- createObject (GraphObject Nothing "Movie" $ DM.fromList [("name",[PVText "Sleepless in Seattle"]),("year",[PVInteger 1990])])
-        ssp <- createRelation (GraphRelation Nothing th ss "Played" $ DM.fromList [("role",[PVText "Sam Baldwin"])])
-        deleteRelation $ fromJust $ grID ssp
-        qs1 <- queryStep (fromJust $ goID th) def
-        let sr1_1 = StepResult (fromJust $ grID fgp) OUT "Played" (DM.fromList [("role",[PVText "Forrest Gump"])]) fg
-        qs2 <- queryStep (fromJust $ goID th) def{rsDirection = IN}
-        qs3 <- queryStep (fromJust $ goID ss) def{rsDirection = IN}
-        qs4 <- queryStep (fromJust $ goID fg) def
-        qs5 <- queryStep (fromJust $ goID fg) def{rsDirection = IN}
-        let sr5_1 = StepResult (fromJust $ grID fgp) IN "Played" (DM.fromList [("role",[PVText "Forrest Gump"])]) th
-        deleteRelation $ fromJust $ grID fgp
-        qs6 <- queryStep (fromJust $ goID th) def
-        qs7 <- queryStep (fromJust $ goID fg) def{rsDirection = IN}
-        fgp2 <- createRelation (GraphRelation Nothing th fg "Played" $ DM.fromList [("role",[PVText "Forrest Gump"])])
-        ssp2 <- createRelation (GraphRelation Nothing th ss "Played" $ DM.fromList [("role",[PVText "Sam Baldwin"])])
-        deleteRelation $ fromJust $ grID fgp2
-        qs8 <- queryStep (fromJust $ goID th) def
-        let sr8_1 = StepResult (fromJust $ grID ssp2) OUT "Played" (DM.fromList [("role",[PVText "Sam Baldwin"])]) ss
+        ssp <- createRelation' (GraphRelation Nothing th ss "Played" $ DM.fromList [("role",[PVText "Sam Baldwin"])])
+        deleteRelation $ grID ssp
+        qs1 <- queryStep (goID th) def
+        let sr1_1 = StepResult (grID fgp) OUT "Played" (DM.fromList [("role",[PVText "Forrest Gump"])]) fg
+        qs2 <- queryStep (goID th) def{rsDirection = IN}
+        qs3 <- queryStep (goID ss) def{rsDirection = IN}
+        qs4 <- queryStep (goID fg) def
+        qs5 <- queryStep (goID fg) def{rsDirection = IN}
+        let sr5_1 = StepResult (grID fgp) IN "Played" (DM.fromList [("role",[PVText "Forrest Gump"])]) th
+        deleteRelation $ grID fgp
+        qs6 <- queryStep (goID th) def
+        qs7 <- queryStep (goID fg) def{rsDirection = IN}
+        fgp2 <- createRelation' (GraphRelation Nothing th fg "Played" $ DM.fromList [("role",[PVText "Forrest Gump"])])
+        ssp2 <- createRelation' (GraphRelation Nothing th ss "Played" $ DM.fromList [("role",[PVText "Sam Baldwin"])])
+        deleteRelation $ grID fgp2
+        qs8 <- queryStep (goID th) def
+        let sr8_1 = StepResult (grID ssp2) OUT "Played" (DM.fromList [("role",[PVText "Sam Baldwin"])]) ss
         
         liftIO $ do
           1 @=? length qs1
@@ -108,7 +104,7 @@ apiTests = testGroup "API tests"
    , testCase "Delete objects recovers id" $
       withTempDB $ do
         th <- createObject (GraphObject Nothing "Actor" $ DM.fromList [("name",[PVText "Tom Hanks"]),("age",[PVInteger 60])])
-        deleteObject $ fromJust $ goID th
+        deleteObject $ goID th
         fg <- createObject (GraphObject Nothing "Movie" $ DM.fromList [("name",[PVText "Forrest Gump"]),("year",[PVInteger 1990])])
         liftIO $
           goID th @=? goID fg
@@ -123,7 +119,7 @@ checkModel r =
   withTempDB $ do
     th <- createObject (GraphObject Nothing "Actor" $ DM.fromList [("name",[PVText "Tom Hanks"]),("age",[PVInteger 60])])
     fg <- createObject (GraphObject Nothing "Movie" $ DM.fromList [("name",[PVText "Forrest Gump"]),("year",[PVInteger 1990])])
-    _ <- createRelation (GraphRelation Nothing th fg "Played" $ DM.fromList [("role",[PVText "Forrest Gump"])])
+    _ <- createRelation' (GraphRelation Nothing th fg "Played" $ DM.fromList [("role",[PVText "Forrest Gump"])])
     mdl2 <- r 
     let propL k = DM.lookup k $ fromName $ mPropertyTypes mdl2
     let typeL k = DM.lookup k $ fromName $ mObjectTypes mdl2

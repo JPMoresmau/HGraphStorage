@@ -33,11 +33,11 @@ main = do
     fg <- createObject (GraphObject Nothing "Movie" $ DM.fromList [("name",[PVText "Forrest Gump"]),("year",[PVInteger 1990])])
     liftIO $ print fg
     (liftIO . print) =<< filterObjects (return . const True)
-    fgp <- createRelation (GraphRelation Nothing th fg "Played" $ DM.fromList [("role",[PVText "Forrest Gump"])])
+    fgp <- createRelation' (GraphRelation Nothing th fg "Played" $ DM.fromList [("role",[PVText "Forrest Gump"])])
     liftIO $ print fgp
     ss <- createObject (GraphObject Nothing "Movie" $ DM.fromList [("name",[PVText "Sleepless in Seattle"]),("year",[PVInteger 1990])])
-    _ <- createRelation (GraphRelation Nothing th ss "Played" $ DM.fromList [("role",[PVText "Somebody"])])
+    _ <- createRelation' (GraphRelation Nothing th ss "Played" $ DM.fromList [("role",[PVText "Somebody"])])
     --filterRelations (const True)
-    queryStep (fromJust $ goID th) def
+    queryStep (goID th) def
     --queryStep (fromJust $ goID ss) def{rsDirection=IN}
   print res

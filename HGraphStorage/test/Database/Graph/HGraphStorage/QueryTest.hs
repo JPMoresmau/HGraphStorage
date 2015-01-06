@@ -12,7 +12,6 @@ import qualified Data.Map as DM
 import Test.Tasty
 import Test.Tasty.HUnit
 import Data.Default (def)
-import Data.Maybe (fromJust)
 import Control.Monad.IO.Class (liftIO)
 
 queryTests :: TestTree
@@ -21,18 +20,18 @@ queryTests = testGroup "Query tests"
       withTempDB $ do
         th <- createObject (GraphObject Nothing "Actor" $ DM.fromList [("name",[PVText "Tom Hanks"]),("age",[PVInteger 60])])
         fg <- createObject (GraphObject Nothing "Movie" $ DM.fromList [("name",[PVText "Forrest Gump"]),("year",[PVInteger 1990])])
-        fgp <- createRelation (GraphRelation Nothing th fg "Played" $ DM.fromList [("role",[PVText "Forrest Gump"])])
+        fgp <- createRelation' (GraphRelation Nothing th fg "Played" $ DM.fromList [("role",[PVText "Forrest Gump"])])
         ss <- createObject (GraphObject Nothing "Movie" $ DM.fromList [("name",[PVText "Sleepless in Seattle"]),("year",[PVInteger 1990])])
-        ssp <- createRelation (GraphRelation Nothing th ss "Played" $ DM.fromList [("role",[PVText "Sam Baldwin"])])
-        qs1 <- queryStep (fromJust $ goID th) def
-        let sr1_1 = StepResult (fromJust $ grID fgp) OUT "Played" (DM.fromList [("role",[PVText "Forrest Gump"])]) fg
-        let sr1_2 = StepResult (fromJust $ grID ssp) OUT "Played" (DM.fromList [("role",[PVText "Sam Baldwin"])]) ss
-        qs2 <- queryStep (fromJust $ goID th) def{rsDirection = IN}
-        qs3 <- queryStep (fromJust $ goID th) def{rsDirection = BOTH}
-        qs4 <- queryStep (fromJust $ goID fg) def
-        qs5 <- queryStep (fromJust $ goID fg) def{rsDirection = IN}
-        let sr5_1 = StepResult (fromJust $ grID fgp) IN "Played" (DM.fromList [("role",[PVText "Forrest Gump"])]) th
-        qs6 <- queryStep (fromJust $ goID fg) def{rsDirection = BOTH}
+        ssp <- createRelation' (GraphRelation Nothing th ss "Played" $ DM.fromList [("role",[PVText "Sam Baldwin"])])
+        qs1 <- queryStep (goID th) def
+        let sr1_1 = StepResult (grID fgp) OUT "Played" (DM.fromList [("role",[PVText "Forrest Gump"])]) fg
+        let sr1_2 = StepResult (grID ssp) OUT "Played" (DM.fromList [("role",[PVText "Sam Baldwin"])]) ss
+        qs2 <- queryStep (goID th) def{rsDirection = IN}
+        qs3 <- queryStep (goID th) def{rsDirection = BOTH}
+        qs4 <- queryStep (goID fg) def
+        qs5 <- queryStep (goID fg) def{rsDirection = IN}
+        let sr5_1 = StepResult (grID fgp) IN "Played" (DM.fromList [("role",[PVText "Forrest Gump"])]) th
+        qs6 <- queryStep (goID fg) def{rsDirection = BOTH}
         liftIO $ do
           2 @=? length qs1
           (sr1_1 `elem` qs1) @? "sr1_1 not in out list!"

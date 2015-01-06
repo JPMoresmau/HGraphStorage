@@ -74,21 +74,21 @@ instance (MonadLogger m) => MonadLogger (GraphStorageT m) where
    monadLoggerLog loc src lvl msg=lift $ monadLoggerLog loc src lvl msg
 
 
-data Graph = Graph [GraphObject] [GraphRelation]
-  deriving (Show,Read,Eq,Ord,Typeable)
+--data Graph = Graph [GraphObject] [GraphRelation]
+--  deriving (Show,Read,Eq,Ord,Typeable)
 
 -- | An object with a type and properties
-data GraphObject = GraphObject
-  { goID         :: Maybe ObjectID
+data GraphObject a = GraphObject
+  { goID         :: a
   , goType       :: T.Text
   , goProperties :: DM.Map T.Text [PropertyValue]
   } deriving (Show,Read,Eq,Ord,Typeable)
 
 -- | A relation between two objects, with a type and properties
-data GraphRelation = GraphRelation
-  { grID         :: Maybe RelationID
-  , grFrom       :: GraphObject
-  , grTo         :: GraphObject
+data GraphRelation a b = GraphRelation
+  { grID         :: a
+  , grFrom       :: GraphObject b
+  , grTo         :: GraphObject b
   , grType       :: T.Text
   , grProperties :: DM.Map T.Text [PropertyValue]
   } deriving (Show,Read,Eq,Ord,Typeable)
@@ -105,14 +105,14 @@ getModel = gsModel `liftM` Gs get
 
 -- | Create or replace an object
 createObject :: (GraphUsableMonad m) =>
-                GraphObject -> GraphStorageT m GraphObject
+                GraphObject (Maybe ObjectID)-> GraphStorageT m (GraphObject ObjectID)
 createObject obj = do
   hs <- getHandles
   tid <- objectType $ goType obj
   --let props = filter (not . null . snd) $ DM.toList $ goProperties obj
   propId <- createProperties $ goProperties obj
   nid <- write hs (goID obj) (Object tid def def propId)
-  return $ obj {goID = Just nid}
+  return $ obj {goID = nid}
   where 
   
 -- | Create properties from map, returns the first ID in the chain
@@ -131,22 +131,22 @@ createProperties = foldM addProps def . DM.toList
 
 -- | filter objects
 filterObjects :: (GraphUsableMonad m) =>
-                (GraphObject -> GraphStorageT m Bool) -> GraphStorageT m [GraphObject]
+                (GraphObject ObjectID -> GraphStorageT m Bool) -> GraphStorageT m [GraphObject ObjectID]
 filterObjects ft = filterM ft =<< (mapM (uncurry populateObject) =<< readAll =<< getHandles)
   
 -- | (Internal) Fill an object with its properties
 populateObject :: (GraphUsableMonad m) =>
-                    ObjectID -> Object -> GraphStorageT m GraphObject
+                    ObjectID -> Object -> GraphStorageT m (GraphObject ObjectID)
 populateObject objId obj = do
   mdl <- getModel
   let pid = oFirstProperty obj
   pmap <- listProperties pid
   let otid = oType obj
   typeName <- throwIfNothing (UnknownObjectType otid) $ DM.lookup otid $ toName $ mObjectTypes mdl
-  return $ GraphObject (Just objId) typeName pmap
+  return $ GraphObject objId typeName pmap
 
 getObject :: (GraphUsableMonad m) =>
-                ObjectID -> GraphStorageT m GraphObject
+                ObjectID -> GraphStorageT m (GraphObject ObjectID)
 getObject gid = populateObject gid =<< flip readOne gid =<< getHandles
 
 
@@ -172,11 +172,25 @@ listProperties pid = do
 
 -- | Create a relation between two objects
 createRelation :: (GraphUsableMonad m) =>
-  GraphRelation -> GraphStorageT m GraphRelation
+  GraphRelation (Maybe RelationID) (Maybe ObjectID) -> GraphStorageT m (GraphRelation RelationID ObjectID)
 createRelation rel = do
-  (fromId,fromObj) <- getObjectId $ grFrom rel
+  fromObj <- getObjectId $ grFrom rel
+  toObj <- getObjectId $ grTo rel
+  createRelation' $ GraphRelation (grID rel) fromObj toObj (grType rel) (grProperties rel)
+  where
+    getObjectId obj = case goID obj of
+      Just i -> return obj{goID=i}
+      Nothing -> createObject obj 
+      
+-- | Create a relation between two objects
+createRelation' :: (GraphUsableMonad m) =>
+  GraphRelation (Maybe RelationID) ObjectID -> GraphStorageT m (GraphRelation RelationID ObjectID)
+createRelation' rel = do
+  let fromObj = grFrom rel
+  let fromId = goID fromObj
   fromTid <- objectType $ goType fromObj
-  (toId,toObj) <- getObjectId $ grTo rel
+  let toObj = grTo rel
+  let toId = goID toObj
   toTid <- objectType $ goType toObj
   rid <- relationType $ grType rel
   propId <- createProperties $ grProperties rel
@@ -187,16 +201,12 @@ createRelation rel = do
   _ <- write hs (Just fromId) fromTObj{oFirstFrom=nid}
   _ <- write hs (Just toId) toTObj{oFirstTo=nid}
   
-  return rel{grID=Just nid,grFrom=fromObj,grTo=toObj}
-  where
-    getObjectId obj = case goID obj of
-      Just i -> return (i,obj)
-      Nothing -> getObjectId =<< createObject obj 
-      
+  return rel{grID=nid,grFrom=fromObj,grTo=toObj}
+
 
 -- | list relations matchinf a filter
 filterRelations :: (GraphUsableMonad m) =>
-                (GraphRelation -> GraphStorageT m Bool) -> GraphStorageT m [GraphRelation]
+                ((GraphRelation RelationID ObjectID)-> GraphStorageT m Bool) -> GraphStorageT m [GraphRelation RelationID ObjectID]
 filterRelations ft = filterM ft =<< (mapM popProperties =<< readAll =<< getHandles)
   where 
     popProperties (relId,rel) = do
@@ -207,7 +217,7 @@ filterRelations ft = filterM ft =<< (mapM popProperties =<< readAll =<< getHandl
       typeName <- throwIfNothing (UnknownRelationType rtid) $ DM.lookup rtid $ toName $ mRelationTypes mdl
       fromObj <- getObject $ rFrom rel
       toObj <- getObject $ rTo rel
-      return $ GraphRelation (Just relId) fromObj toObj typeName pmap
+      return $ GraphRelation relId fromObj toObj typeName pmap
 
 
 -- | Delete a relation from the DB.
