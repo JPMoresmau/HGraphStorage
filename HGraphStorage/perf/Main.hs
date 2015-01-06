@@ -11,7 +11,7 @@ main = do
   -- convertHack
   g <- buildHackageGraph
   let _ = g `seq` ()
-  putStrLn $ ((show $ length $ DM.keys g) ++  " packages")
+  putStrLn (show (length $ DM.keys g) ++ " packages")
   defaultMain 
     [bench "Write Hackage" $ nfIO $ writeGraph g]
 
