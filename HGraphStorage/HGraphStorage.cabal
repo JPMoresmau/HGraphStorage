@@ -107,7 +107,8 @@ benchmark HGraphStorage-bench
                    criterion,
                    bytestring,
                    binary,
-                   text-binary
+                   text-binary,
+                   transformers >=0.4 && <0.5
   hs-source-dirs:  perf
   ghc-options:     -Wall -rtsopts
   main-is:         Main.hs

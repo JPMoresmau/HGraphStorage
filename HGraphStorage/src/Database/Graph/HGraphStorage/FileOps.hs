@@ -63,6 +63,7 @@ close Handles{..} = do
   hClose hObjectTypes
   hClose hRelations
   _ <- closeFreeList hRelationFree
+  hClose hRelationTypes
   hClose hProperties
   _ <- closeFreeList hPropertyFree
   hClose hPropertyTypes

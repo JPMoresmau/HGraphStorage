@@ -10,7 +10,7 @@ import System.FilePath
 import Control.Monad (filterM, foldM, when)
 import qualified Data.Map.Strict as DM
 import qualified Data.Text as T
-import Data.Text.Binary
+import Data.Text.Binary ()
 import Distribution.Package
 import Distribution.PackageDescription
 import Distribution.PackageDescription.Parse
@@ -22,7 +22,11 @@ import Data.Binary
 
 
 import Database.Graph.HGraphStorage.API
+import Database.Graph.HGraphStorage.Index as Idx
 import Database.Graph.HGraphStorage.Types
+import Control.Monad.IO.Class (liftIO)
+import Data.Int
+import Data.Maybe
 
 buildHackageGraph :: IO(DM.Map T.Text (DM.Map T.Text [(T.Text,T.Text)]))
 buildHackageGraph = do
@@ -125,17 +129,22 @@ getSubDirs folder = do
 
 
 writeGraph :: DM.Map T.Text (DM.Map T.Text [(T.Text,T.Text)]) -> IO ()
-writeGraph memGraph = withTempDB "hackage-test-graph" $ do
-  pkgMap <- foldM createPackage DM.empty $ DM.keys memGraph
+writeGraph memGraph = withTempDB "hackage-test-graph" True $ do
+  indexPackageNames <- createIndex "packageNames"
+  pkgMap <- foldM (createPackage indexPackageNames) DM.empty $ DM.keys memGraph
   mapM_ (createVersions pkgMap) $ DM.toList memGraph
-  return ()
   where
-    createPackage m pkg = do
+    createPackage indexPackageNames m pkg = do
       goPkg <- createObject $ GraphObject Nothing "Package" $ DM.fromList [("name",[PVText pkg])]
+      --liftIO $ putStrLn $ (T.unpack pkg) ++"->" ++ (show $ textToKey pkg) ++ ":" ++ (show $ goID goPkg)
+      let key = textToKey pkg
+      mex <- liftIO $ Idx.insert key (goID goPkg) indexPackageNames
+      when (isJust mex) $ error $ "duplicate index: " ++ T.unpack pkg ++"->" ++ show key ++ ":" ++ show mex
+      -- ml <- liftIO $ Idx.lookup key indexPackageNames
+      -- when (Just (goID goPkg) /= ml) $ error $ "wrong lookup: "++ (show key) ++ "->" ++ show ml
       return $ DM.insert pkg goPkg m
     createVersions pkgMap (pkg,depsByVersion) 
-      | Just goPkg <- DM.lookup pkg pkgMap = do
-        mapM_ (createVersion goPkg pkgMap) $ DM.toList depsByVersion
+      | Just goPkg <- DM.lookup pkg pkgMap = mapM_ (createVersion goPkg pkgMap) $ DM.toList depsByVersion
       | otherwise = return ()
     createVersion goPkg pkgMap (vr,deps) = do
       goVer <- createObject $ GraphObject Nothing "Version" $ DM.fromList [("name",[PVText vr])]
@@ -146,17 +155,36 @@ writeGraph memGraph = withTempDB "hackage-test-graph" $ do
         _ <- createRelation' $ GraphRelation Nothing goVer goPkg "depends" $ DM.fromList [("range",[PVText range])]
         return ()
       | otherwise = return ()
+
     
+nameIndex :: DM.Map T.Text (DM.Map T.Text [(T.Text,T.Text)]) -> IO ()
+nameIndex memGraph = withTempDB "hackage-test-graph" False $ do
+  indexPackageNames :: Trie Int16 ObjectID <- createIndex "packageNames"
+  let ks = DM.keys memGraph
+  let pkgLen = length ks
+  pkgMap <- foldM (getPackage indexPackageNames) DM.empty ks
+  let idLen = length $ DM.keys pkgMap
+  when (pkgLen /= idLen) $ error $ "wrong length:" ++ show idLen
+  return ()
+  where
+    getPackage indexPackageNames m pkg = do
+      mid <- liftIO $ Idx.lookup (textToKey pkg) indexPackageNames
+      return $ case mid of
+        Just oid -> DM.insert oid pkg m
+        _ -> error $ "empty lookup:" ++ T.unpack pkg
+    
+textToKey :: T.Text  -> [Int16]
+textToKey = map (fromIntegral . fromEnum) . T.unpack
+
 
 withTempDB :: forall b.
-  FilePath ->
-                GraphStorageT (R.ResourceT (LoggingT IO)) b
+  FilePath -> Bool -> GraphStorageT (R.ResourceT (LoggingT IO)) b
                 -> IO b
-withTempDB fn f = do
+withTempDB fn del f = do
   tmp <- getTemporaryDirectory
   let dir = tmp </> fn
   ex <- doesDirectoryExist dir
-  when ex $ do
+  when (ex && del) $ do
     cnts <- getDirectoryContents dir
     mapM_ removeFile =<< filterM doesFileExist (map (dir </>) cnts)
   runStderrLoggingT $ withGraphStorage dir f

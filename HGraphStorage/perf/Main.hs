@@ -13,5 +13,6 @@ main = do
   let _ = g `seq` ()
   putStrLn (show (length $ DM.keys g) ++ " packages")
   defaultMain 
-    [bench "Write Hackage" $ nfIO $ writeGraph g]
+    [bench "Write Hackage" $ nfIO $ writeGraph g
+    ,bench "Index Lookup" $ nfIO $ nameIndex g]
 

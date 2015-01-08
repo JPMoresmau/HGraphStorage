@@ -6,7 +6,7 @@ import Control.Applicative
 import Control.Monad (MonadPlus, liftM, foldM, filterM, void)
 import Control.Monad.Base (MonadBase(..))
 import Control.Monad.Fix (MonadFix)
-import Control.Monad.IO.Class (MonadIO)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Class (MonadTrans(lift))
 import Control.Monad.Trans.Control ( MonadTransControl(..), MonadBaseControl(..)
                                    , ComposeSt, defaultLiftBaseWith
@@ -15,22 +15,27 @@ import Control.Monad.Trans.Control ( MonadTransControl(..), MonadBaseControl(..)
 import qualified Data.Map as DM
 import qualified Data.Text as T
 import Data.Typeable
+import Data.Binary (Binary)
+import Data.Default
 
 import Control.Monad.Logger
 
 import qualified Control.Monad.Trans.Resource as R
+import System.FilePath
+import System.IO
 
 import Database.Graph.HGraphStorage.FileOps
 import Database.Graph.HGraphStorage.Types
 import Data.Default (def)
 import Control.Monad.Trans.State.Lazy
 import Database.Graph.HGraphStorage.FreeList (addToFreeList)
-
+import Database.Graph.HGraphStorage.Index
 
 -- | State for the monad
 data GsData = GsData
   { gsHandles :: Handles
   , gsModel   :: Model
+  , gsDir     :: FilePath
   } 
 
 
@@ -43,9 +48,10 @@ withGraphStorage :: forall (m :: * -> *) a.
 withGraphStorage dir (Gs act) = R.runResourceT $ do
   (rk,hs) <- R.allocate (open dir) close
   model <- readModel hs
-  res <- evalStateT act (GsData hs model)
+  res <- evalStateT act (GsData hs model dir)
   R.release rk
   return res
+
 
 
 
@@ -102,6 +108,12 @@ getHandles = gsHandles `liftM` Gs get
 -- | Get the currently known model.
 getModel :: Monad m => GraphStorageT m Model
 getModel = gsModel `liftM` Gs get
+
+-- | Get the currently known model.
+getDirectory :: Monad m => GraphStorageT m FilePath
+getDirectory = gsDir `liftM` Gs get
+
+
 
 -- | Create or replace an object
 createObject :: (GraphUsableMonad m) =>
@@ -356,4 +368,11 @@ fetchType getM setM k name build = do
       Gs $ modify (\s -> s{gsModel=mdl2})
       return newid  
 
- 
+ -- | create an index
+createIndex :: forall k v m. (Binary k,Binary v,Default k,Default v,GraphUsableMonad m) =>
+                T.Text -> GraphStorageT m (Trie k v)
+createIndex idxName =  do
+  dir <- getDirectory
+  --trie <- liftIO $ newFileTrie $ dir </> T.unpack idxName
+  (_,trie) <- R.allocate (liftIO $ newFileTrie $ dir </> T.unpack idxName) (hClose . trHandle)
+  return trie

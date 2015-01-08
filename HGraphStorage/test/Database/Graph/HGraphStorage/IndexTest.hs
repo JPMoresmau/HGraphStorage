@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ScopedTypeVariables, OverloadedStrings #-}
 -- | Test index
 module Database.Graph.HGraphStorage.IndexTest where
 
@@ -8,9 +8,10 @@ import Database.Graph.HGraphStorage.Utils
 import Data.Int
 import System.IO
 
+import qualified Data.Text as T
+
 import Test.Tasty
 import Test.Tasty.HUnit
-import Control.Monad (liftM, void)
 
 indexTests :: TestTree
 indexTests = testGroup "Index tests"
@@ -24,11 +25,12 @@ indexTests = testGroup "Index tests"
       equalsM (Just 15) $ GI.lookup (toInt16 "A") tr
       equalsM Nothing $ GI.lookup (toInt16 "to") tr
       equalsM Nothing $ insertNew (toInt16 "tea") 3 tr
+      equalsM (Just 3) $ GI.lookup (toInt16 "tea") tr
       -- insert another value: ignored
-      equalsM Nothing $ insertNew (toInt16 "A") 16 tr
+      equalsM (Just 15) $ insertNew (toInt16 "A") 16 tr
       equalsM (Just 15) $ GI.lookup (toInt16 "A") tr
       equalsM Nothing $ GI.lookup (toInt16 "to") tr
-      equalsM Nothing $ insertNew (toInt16 "tea") 3 tr
+      equalsM (Just 3) $ insertNew (toInt16 "tea") 3 tr
       equalsM (Just 15) $ GI.lookup (toInt16 "A") tr
       equalsM Nothing $ GI.lookup (toInt16 "to") tr
       equalsM (Just 3) $ GI.lookup (toInt16 "tea") tr
@@ -50,7 +52,7 @@ indexTests = testGroup "Index tests"
       equalsM Nothing $ GI.lookup (toInt16 "t") tr
       equalsM Nothing $ GI.lookup (toInt16 "te") tr
       -- insert and override
-      equalsM Nothing $ insertNew (toInt16 "A") 16 tr
+      equalsM (Just 15) $ insert (toInt16 "A") 16 tr
       equalsM (Just 16) $ GI.lookup (toInt16 "A") tr
       -- delete
       equalsM (Just 5) $ GI.delete (toInt16 "in") tr
@@ -58,15 +60,30 @@ indexTests = testGroup "Index tests"
       equalsM (Just 9) $ GI.lookup (toInt16 "inn") tr
       equalsM (Just 11) $ GI.lookup (toInt16 "i") tr
       hClose h
+   , testCase "Collision test" $
+     withTempFile $ \f -> do
+      tr :: (Trie Int16 Int32) <- newFileTrie f
+      equalsM Nothing $ insert (toInt16 "3d-graphics-examples") 1 tr
+      equalsM (Just 1) $ GI.lookup (toInt16 "3d-graphics-examples") tr
+      equalsM Nothing $ GI.lookup (toInt16 "ace") tr
+      equalsM Nothing $ GI.lookup (toInt16 "ac-machine") tr
+      equalsM Nothing $ insertNew (toInt16 "ac-machine") 945 tr
+      equalsM Nothing $ insertNew (toInt16 "ac-machine-conduit") 946 tr
+      equalsM (Just 945) $ GI.lookup (toInt16 "ac-machine") tr
+      equalsM Nothing $ insertNew (toInt16 "accelerate-fourier-benchmark") 956 tr
+      equalsM Nothing $ insertNew (toInt16 "ace") 961 tr
+      equalsM (Just 961) $ GI.lookup (toInt16 "ace") tr
+      equalsM (Just 945) $ GI.lookup (toInt16 "ac-machine") tr
+      hClose $ trHandle tr
   ]
   
 
 -- | equals assertion in the monad
 equalsM :: (Show a, Eq a) =>
              a -> IO a -> IO ()
-equalsM a = void . (liftM $ (\x -> a @=? x))
+equalsM a f = (a @=?) =<< f
 
 
 -- | Convert a string to an array of int16
-toInt16 :: String -> [Int16]
-toInt16 = map (fromIntegral . fromEnum)
+toInt16 :: T.Text -> [Int16]
+toInt16 = map (fromIntegral . fromEnum) . T.unpack

@@ -3,8 +3,9 @@
 -- <http://sqlity.net/en/2445/b-plus-tree>
 -- <http://en.wikipedia.org/wiki/Trie>
 module Database.Graph.HGraphStorage.Index 
-  ( Trie
+  ( Trie (..)
   , newTrie
+  , newFileTrie
   , insertNew
   , insert
   , Database.Graph.HGraphStorage.Index.lookup
@@ -21,6 +22,8 @@ import Database.Graph.HGraphStorage.Types
 
 import Data.Default
 import qualified Data.ByteString.Lazy  as BS
+import System.FilePath
+import System.Directory
 
 
 -- | Trie on disk
@@ -40,6 +43,15 @@ data TrieNode k v = TrieNode
 
 -- | Simple binary instance
 instance (Binary k, Binary v) => Binary (TrieNode k v)
+
+
+newFileTrie  :: forall k v. (Binary k,Binary v,Default k,Default v) => FilePath -> IO (Trie k v)
+newFileTrie file = do
+  let dir = takeDirectory file
+  createDirectoryIfMissing True dir
+  h<- openBinaryFile file ReadWriteMode
+  return $ newTrie h 
+
 
 -- | Create a new trie with a given handle
 -- The limitations are:
@@ -82,8 +94,8 @@ insertValue :: (Binary k,Eq k,Default k,Binary v,Eq v,Default v)
   => [k] -> v -> Trie k v 
   -> (Handle -> (Int64,TrieNode k v) ->IO (Maybe v))
   -> IO (Maybe v)
-insertValue key val tr onExisting = do
-  (readRecord tr 0) >>= insert' key 
+insertValue key val tr onExisting =
+  readRecord tr 0 >>= insert' key 
   where 
     h = trHandle tr
     insert' [] _ = return Nothing
@@ -91,24 +103,12 @@ insertValue key val tr onExisting = do
       hSeek h AbsoluteSeek 0
       let newC = TrieNode k (if null ks then val else def) def def
       BS.hPut h $ encode newC
-      insert' ks (Just (0,newC))
-    insert' (k:ks) (Just (off,node)) = do
+      insertChild ks (Just (0,newC))
+    insert' (k:ks) (Just (off,node)) =
       if k == tnKey node
         then case ks of
-          [] -> do
-              onExisting h (off,node)
-          (k':ks') -> do
-              mc <- readChildRecord tr $ tnChild node
-              case mc of
-                Just c -> insert' ks $ Just c
-                Nothing -> do
-                  hSeek h SeekFromEnd 0
-                  allsz <- fromIntegral <$> hTell h
-                  let newC = TrieNode k' (if null ks' then val else def) def def
-                  BS.hPut h $ encode newC
-                  hSeek h AbsoluteSeek $ fromIntegral off
-                  BS.hPut h $ encode (node{tnChild=allsz})
-                  insert' ks' (Just (allsz,newC))
+          [] -> onExisting h (off,node)
+          _ -> insertChild ks (Just (off,node))
         else do
           mn <- readChildRecord tr $ tnNext node
           case mn of
@@ -120,8 +120,21 @@ insertValue key val tr onExisting = do
               BS.hPut h $ encode newN
               hSeek h AbsoluteSeek $ fromIntegral off
               BS.hPut h $ encode (node{tnNext=allsz})
-              insert' ks (Just (allsz,newN))
-
+              insertChild ks (Just (allsz,newN))
+    insertChild [] _      = return Nothing
+    insertChild _ Nothing = return Nothing
+    insertChild ks@(k':ks') (Just (off,node)) = do
+      mc <- readChildRecord tr $ tnChild node
+      case mc of
+        Just c -> insert' ks $ Just c
+        Nothing -> do
+          hSeek h SeekFromEnd 0
+          allsz <- fromIntegral <$> hTell h
+          let newC = TrieNode k' (if null ks' then val else def) def def
+          BS.hPut h $ encode newC
+          hSeek h AbsoluteSeek $ fromIntegral off
+          BS.hPut h $ encode (node{tnChild=allsz})
+          insertChild ks' (Just (allsz,newC))
 
 -- | Read a given record
 readRecord :: (Binary k,Binary v) => Trie k v -> Int64 -> IO (Maybe (Int64,TrieNode k v))
@@ -169,9 +182,8 @@ lookupNode key tr = do
             then return $ Just (off,node)
             else (readChildRecord tr $ tnChild node) >>= lookup' ks
         else 
-          if tnNext node /= def
-            then (readChildRecord tr $ tnNext node) >>= lookup' (k:ks)
-            else return Nothing 
+          (readChildRecord tr $ tnNext node) >>= lookup' (k:ks)
+
           
 
 -- | Delete the value associated with a key
