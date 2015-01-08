@@ -10,6 +10,7 @@ import Control.Monad (when, filterM)
 import qualified Control.Monad.Trans.Resource as R
 
 import Control.Monad.Logger
+import Data.Default (def)
 
 withTempDB :: forall b.
                 GraphStorageT (R.ResourceT (LoggingT IO)) b
@@ -21,7 +22,7 @@ withTempDB f = do
   when ex $ do
     cnts <- getDirectoryContents dir
     mapM_ removeFile =<< filterM doesFileExist (map (dir </>) cnts)
-  runStderrLoggingT $ withGraphStorage dir f
+  runStderrLoggingT $ withGraphStorage dir def f
   
 withTempFile :: (FilePath -> IO b)
                 -> IO b

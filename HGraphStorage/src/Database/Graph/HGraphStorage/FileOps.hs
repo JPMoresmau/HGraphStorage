@@ -27,8 +27,8 @@ import Control.Monad.IO.Class (liftIO)
 import Database.Graph.HGraphStorage.FreeList
 
 -- | Open all the file handles
-open :: FilePath -> IO Handles
-open dir = do
+open :: FilePath -> GraphSettings -> IO Handles
+open dir gs = do
   createDirectoryIfMissing True dir
   Handles 
     <$> getHandle objectFile
@@ -45,15 +45,22 @@ open dir = do
     getHandle :: FilePath -> IO Handle
     getHandle name = do
       let f = dir </> name
-      openBinaryFile f ReadWriteMode
+      h <- openBinaryFile f ReadWriteMode
+      setBufferMode h $ gsMainBuffering gs 
+      return h
     getFreeList :: (Binary a) => FilePath -> a -> IO (FreeList a)
     getFreeList name d = do
       let f = dir </> freePrefix ++ name
       h<- openBinaryFile f ReadWriteMode
+      setBufferMode h $ gsFreeBuffering gs 
       initFreeList (fromIntegral $ binLength d) h (do
           ex <- doesFileExist f
           when ex $ removeFile f)
-
+          
+          
+setBufferMode :: Handle -> Maybe BufferMode -> IO()
+setBufferMode _ Nothing = return ()
+setBufferMode h (Just bm) = hSetBuffering h bm
 
 -- | Close all the file handles
 close :: Handles -> IO ()

@@ -27,6 +27,7 @@ import Database.Graph.HGraphStorage.Types
 import Control.Monad.IO.Class (liftIO)
 import Data.Int
 import Data.Maybe
+import Data.Default (def)
 
 buildHackageGraph :: IO(DM.Map T.Text (DM.Map T.Text [(T.Text,T.Text)]))
 buildHackageGraph = do
@@ -128,8 +129,8 @@ getSubDirs folder = do
           else return False
 
 
-writeGraph :: DM.Map T.Text (DM.Map T.Text [(T.Text,T.Text)]) -> IO ()
-writeGraph memGraph = withTempDB "hackage-test-graph" True $ do
+writeGraph :: GraphSettings -> DM.Map T.Text (DM.Map T.Text [(T.Text,T.Text)]) -> IO ()
+writeGraph gs memGraph = withTempDB "hackage-test-graph" True gs $ do
   indexPackageNames <- createIndex "packageNames"
   pkgMap <- foldM (createPackage indexPackageNames) DM.empty $ DM.keys memGraph
   mapM_ (createVersions pkgMap) $ DM.toList memGraph
@@ -158,7 +159,7 @@ writeGraph memGraph = withTempDB "hackage-test-graph" True $ do
 
     
 nameIndex :: DM.Map T.Text (DM.Map T.Text [(T.Text,T.Text)]) -> IO ()
-nameIndex memGraph = withTempDB "hackage-test-graph" False $ do
+nameIndex memGraph = withTempDB "hackage-test-graph" False def $ do
   indexPackageNames :: Trie Int16 ObjectID <- createIndex "packageNames"
   let ks = DM.keys memGraph
   let pkgLen = length ks
@@ -178,13 +179,13 @@ textToKey = map (fromIntegral . fromEnum) . T.unpack
 
 
 withTempDB :: forall b.
-  FilePath -> Bool -> GraphStorageT (R.ResourceT (LoggingT IO)) b
+  FilePath -> Bool -> GraphSettings -> GraphStorageT (R.ResourceT (LoggingT IO)) b
                 -> IO b
-withTempDB fn del f = do
+withTempDB fn del gs f = do
   tmp <- getTemporaryDirectory
   let dir = tmp </> fn
   ex <- doesDirectoryExist dir
   when (ex && del) $ do
     cnts <- getDirectoryContents dir
     mapM_ removeFile =<< filterM doesFileExist (map (dir </>) cnts)
-  runStderrLoggingT $ withGraphStorage dir f
+  runStderrLoggingT $ withGraphStorage dir gs f

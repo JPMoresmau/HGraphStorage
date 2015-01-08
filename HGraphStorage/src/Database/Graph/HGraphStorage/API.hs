@@ -26,16 +26,16 @@ import System.IO
 
 import Database.Graph.HGraphStorage.FileOps
 import Database.Graph.HGraphStorage.Types
-import Data.Default (def)
 import Control.Monad.Trans.State.Lazy
 import Database.Graph.HGraphStorage.FreeList (addToFreeList)
 import Database.Graph.HGraphStorage.Index
 
 -- | State for the monad
 data GsData = GsData
-  { gsHandles :: Handles
-  , gsModel   :: Model
-  , gsDir     :: FilePath
+  { gsHandles  :: Handles
+  , gsModel    :: Model
+  , gsDir      :: FilePath
+  , gsSettings :: GraphSettings
   } 
 
 
@@ -44,11 +44,11 @@ withGraphStorage :: forall (m :: * -> *) a.
                       (R.MonadThrow m, MonadIO m,
                       MonadLogger m,
                        MonadBaseControl IO m) =>
-                      FilePath -> GraphStorageT (R.ResourceT m) a -> m a
-withGraphStorage dir (Gs act) = R.runResourceT $ do
-  (rk,hs) <- R.allocate (open dir) close
+                      FilePath -> GraphSettings -> GraphStorageT (R.ResourceT m) a -> m a
+withGraphStorage dir gs (Gs act) = R.runResourceT $ do
+  (rk,hs) <- R.allocate (open dir gs) close
   model <- readModel hs
-  res <- evalStateT act (GsData hs model dir)
+  res <- evalStateT act (GsData hs model dir gs)
   R.release rk
   return res
 
@@ -114,6 +114,9 @@ getDirectory :: Monad m => GraphStorageT m FilePath
 getDirectory = gsDir `liftM` Gs get
 
 
+-- | Get the current settings.
+getSettings :: Monad m => GraphStorageT m GraphSettings
+getSettings = gsSettings `liftM` Gs get
 
 -- | Create or replace an object
 createObject :: (GraphUsableMonad m) =>
@@ -375,4 +378,6 @@ createIndex idxName =  do
   dir <- getDirectory
   --trie <- liftIO $ newFileTrie $ dir </> T.unpack idxName
   (_,trie) <- R.allocate (liftIO $ newFileTrie $ dir </> T.unpack idxName) (hClose . trHandle)
+  gs <- getSettings
+  liftIO $ setBufferMode (trHandle trie) $ gsIndexBuffering gs
   return trie

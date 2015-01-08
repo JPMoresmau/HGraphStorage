@@ -11,7 +11,6 @@ import Control.Monad.Logger (runStdoutLoggingT)
 import Control.Monad (when, filterM)
 import Control.Monad.IO.Class (liftIO)
 import Data.Default (def)
-import Data.Maybe (fromJust)
 
 
 main::IO()
@@ -27,7 +26,7 @@ main = do
   when ex $ do
     cnts <- getDirectoryContents dir
     mapM_ removeFile =<< filterM doesFileExist (map (dir </>) cnts)
-  res <- runStdoutLoggingT $ withGraphStorage dir $ do
+  res <- runStdoutLoggingT $ withGraphStorage dir def $ do
     th <- createObject (GraphObject Nothing "Actor" $ DM.fromList [("name",[PVText "Tom Hanks"]),("age",[PVInteger 60])])
     liftIO $ print th
     fg <- createObject (GraphObject Nothing "Movie" $ DM.fromList [("name",[PVText "Forrest Gump"]),("year",[PVInteger 1990])])

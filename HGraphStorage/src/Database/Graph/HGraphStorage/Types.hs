@@ -248,4 +248,14 @@ data GraphStorageException =
 -- | Make our exception a standard exception
 instance Exception GraphStorageException
 
-  
+-- | Settings for the Graph DB
+data GraphSettings = GraphSettings
+  { gsMainBuffering  :: Maybe BufferMode
+  , gsFreeBuffering  :: Maybe BufferMode
+  , gsIndexBuffering :: Maybe BufferMode
+  } deriving (Show,Read,Eq,Ord,Typeable)
+
+-- | Default instance for settings
+instance Default GraphSettings where
+  def = GraphSettings Nothing Nothing Nothing
+
