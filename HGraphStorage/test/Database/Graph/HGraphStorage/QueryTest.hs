@@ -32,6 +32,7 @@ queryTests = testGroup "Query tests"
         qs5 <- queryStep (goID fg) def{rsDirection = IN}
         let sr5_1 = StepResult (grID fgp) IN "Played" (DM.fromList [("role",[PVText "Forrest Gump"])]) th
         qs6 <- queryStep (goID fg) def{rsDirection = BOTH}
+        qs7 <- queryStep (goID th) def{rsLimit = Just 1}
         liftIO $ do
           2 @=? length qs1
           (sr1_1 `elem` qs1) @? "sr1_1 not in out list!"
@@ -44,5 +45,8 @@ queryTests = testGroup "Query tests"
           1 @=? length qs5
           (sr5_1 `elem` qs5) @? "sr5_1 not in in list!"
           1 @=? length qs6
-          (sr5_1 `elem` qs6) @? "sr5_1 not in both list!"
+          (sr5_1 `elem` qs6) @? "r5_1 not in both list!"
+          1 @=? length qs7
+          (sr1_2 `elem` qs7) @? "sr1_1 not in out limited list!"
+      
   ]

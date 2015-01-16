@@ -1,7 +1,8 @@
-{-# LANGUAGE DeriveDataTypeable, ConstraintKinds, FlexibleContexts #-}
+{-# LANGUAGE DeriveDataTypeable, ConstraintKinds, FlexibleContexts, PatternGuards #-}
 -- | Higher level API for querying
 module Database.Graph.HGraphStorage.Query where
 
+import Control.Applicative
 import Data.Default
 import Data.Typeable
 import qualified Data.Text as T
@@ -20,10 +21,11 @@ data RelationStep = RelationStep
   , rsDirection :: RelationDir
   , rsTgtTypes  :: [T.Text]
   , rsTgtFilter :: GraphObject ObjectID -> Bool
+  , rsLimit     :: Maybe Int
   } deriving (Typeable)
 
 instance Default RelationStep where
-  def = RelationStep [] OUT [] (const True)
+  def = RelationStep [] OUT [] (const True) Nothing
 
 data StepResult = StepResult
   { srRelationID :: RelationID
@@ -44,16 +46,18 @@ queryStep oid rs = do
   let filt1 = filterRels hs restrictedRelTypes restrictedObjTypes (rsTgtFilter rs)
   froms <- 
     if rsDirection rs `elem` [OUT,BOTH]
-      then filt1 (oFirstFrom o) rFromNext rToType rTo OUT []
-      else return []
+      then filt1 (oFirstFrom o) rFromNext rToType rTo OUT ([],0)
+      else return ([],0)
   if rsDirection rs `elem` [IN,BOTH]
-      then filt1 (oFirstTo o) rToNext rFromType rFrom IN froms
-      else return froms
+      then fst <$> filt1 (oFirstTo o) rToNext rFromType rFrom IN froms 
+      else return $ fst froms
   where
     isRestricted [] _ =True
     isRestricted ls l = l `elem` ls
-    filterRels hs resRels resObjs filt fid tonext tgtType tgtId dir accum 
-      | fid == def = return accum
+    filterRels hs resRels resObjs filt fid tonext tgtType tgtId dir (accum,cnt) 
+      | fid == def = return (accum,cnt)
+      | Just a <- rsLimit rs , 
+        cnt==a = return (accum,cnt)
       | otherwise  = do
         rel <- readOne hs fid
         let next = tonext rel
@@ -68,7 +72,7 @@ queryStep oid rs = do
                 pmap <- listProperties pid
                 let rtid = rType rel
                 typeName <- throwIfNothing (UnknownRelationType rtid) $ DM.lookup rtid $ toName $ mRelationTypes mdl
-                return $ StepResult fid dir typeName pmap obj : accum
-              else return accum
-          else return accum
+                return (StepResult fid dir typeName pmap obj : accum,cnt+1)
+              else return (accum,cnt)
+          else return (accum,cnt)
         filterRels hs resRels resObjs filt next tonext tgtType tgtId dir accum2
