@@ -6,7 +6,7 @@ author:         JP Moresmau <jp@moresmau.fr>
 maintainer:     JP Moresmau <jp@moresmau.fr>
 stability:      experimental
 category:       Database
-homepage:       https://github.com/JPMoresmau/dbIDE/tree/master/HGraphStorage
+homepage:       https://github.com/JPMoresmau/HGraphStorage
 synopsis:       Graph database stored on disk
 description:    A graph database storing its data on disk.
 copyright:      JP Moresmau 2014
@@ -61,7 +61,7 @@ executable HGraphStorage
 
 source-repository head
   type:      git
-  location:  https://github.com/JPMoresmau/dbIDE.git
+  location:  https://github.com/JPMoresmau/HGraphStorage.git
 
 test-suite hgraphstorage-test
   type:            exitcode-stdio-1.0
@@ -108,8 +108,8 @@ benchmark HGraphStorage-bench
                    bytestring,
                    binary,
                    text-binary,
-                   transformers >=0.4 && <0.5,
-                   data-default >=0.5 && <0.6
+                   data-default,
+                   transformers
   hs-source-dirs:  perf
   ghc-options:     -Wall -rtsopts
   main-is:         Main.hs

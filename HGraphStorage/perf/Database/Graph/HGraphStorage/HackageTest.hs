@@ -11,7 +11,7 @@ import Control.Monad (filterM, foldM, when)
 import qualified Data.Map.Strict as DM
 import qualified Data.Text as T
 import Data.Text.Binary ()
-import Distribution.Package
+import Distribution.Package hiding (depends)
 import Distribution.PackageDescription
 import Distribution.PackageDescription.Parse
 import Distribution.Verbosity
@@ -28,6 +28,7 @@ import Control.Monad.IO.Class (liftIO)
 import Data.Int
 import Data.Maybe
 import Data.Default (def)
+import Database.Graph.HGraphStorage.Query
 
 buildHackageGraph :: IO(DM.Map T.Text (DM.Map T.Text [(T.Text,T.Text)]))
 buildHackageGraph = do
@@ -45,27 +46,18 @@ buildHackageGraph = do
         BS.writeFile serf $ encode memG
         return memG
 
-convertHack :: IO ()
-convertHack = do
-  let serf= "data" </> "index.ser"
-  m :: (DM.Map T.Text (DM.Map T.Text [Dependency])) <- read <$> readFile serf
-  let m2=DM.map toText1 m
-  let binf= "data" </> "index.bin"
-  BS.writeFile binf $ encode m2
-  where 
-    toText1 byVer = DM.map (map toText2) byVer 
-    toText2 (Dependency (PackageName name) range)=(T.pack name,T.pack $ show range)
+-- code to convert serialize to binary
+--convertHack :: IO ()
+--convertHack = do
+--  let serf= "data" </> "index.ser"
+--  m :: (DM.Map T.Text (DM.Map T.Text [Dependency])) <- read <$> readFile serf
+--  let m2=DM.map toText1 m
+--  let binf= "data" </> "index.bin"
+--  BS.writeFile binf $ encode m2
+--  where 
+--    toText1 byVer = DM.map (map toText2) byVer 
+--    toText2 (Dependency (PackageName name) range)=(T.pack name,T.pack $ show range)
 
---hackageTest :: IO()
---hackageTest = do
---    let f= "data" </> "index.tar.gz"
---    tmp <- getTemporaryDirectory
---    let fldr=tmp </> "hackage-bench"
---    createDirectoryIfMissing True fldr
---    unTarGzip f fldr
---    memGraph <- createMemoryGraph fldr
---    writeGraph memGraph
---    return ()
                       
 -- |Un-gzip and un-tar a file into a folder.
 unTarGzip :: FilePath -> FilePath -> IO ()
@@ -119,6 +111,7 @@ createMemoryGraph folder = do
         else return m
     toText (Dependency (PackageName name) range)=(T.pack name,T.pack $ show range)
 
+getSubDirs :: FilePath -> IO [FilePath]
 getSubDirs folder = do
   cnts <- getDirectoryContents folder
   filterM isDir cnts
@@ -149,11 +142,11 @@ writeGraph gs memGraph = withTempDB "hackage-test-graph" True gs $ do
       | otherwise = return ()
     createVersion goPkg pkgMap (vr,deps) = do
       goVer <- createObject $ GraphObject Nothing "Version" $ DM.fromList [("name",[PVText vr])]
-      _ <- createRelation' $ GraphRelation Nothing goPkg goVer "versions" DM.empty
+      _ <- createRelation' $ GraphRelation Nothing goPkg goVer versions DM.empty
       mapM_ (createDep goVer pkgMap) deps
     createDep goVer pkgMap (name,range) 
       | Just goPkg <- DM.lookup name pkgMap = do 
-        _ <- createRelation' $ GraphRelation Nothing goVer goPkg "depends" $ DM.fromList [("range",[PVText range])]
+        _ <- createRelation' $ GraphRelation Nothing goVer goPkg depends $ DM.fromList [("range",[PVText range])]
         return ()
       | otherwise = return ()
 
@@ -173,10 +166,28 @@ nameIndex memGraph = withTempDB "hackage-test-graph" False def $ do
       return $ case mid of
         Just oid -> DM.insert oid pkg m
         _ -> error $ "empty lookup:" ++ T.unpack pkg
+
+yesodQuery :: IO Int
+yesodQuery  = withTempDB "hackage-test-graph" False def $ do
+  indexPackageNames :: Trie Int16 ObjectID <- createIndex "packageNames"
+  mid <- liftIO $ Idx.lookup (textToKey "yesod") indexPackageNames
+  case mid of
+    Just oid -> do
+      res <- queryStep oid def{rsRelTypes=[versions],rsDirection = OUT}
+      let l = length res
+      when (l < 111) $ error "less than 111 versions for yesod"
+      return l
+    _ -> error "empty lookup for yesod"
+
     
 textToKey :: T.Text  -> [Int16]
 textToKey = map (fromIntegral . fromEnum) . T.unpack
 
+versions :: T.Text
+versions = "versions"
+
+depends :: T.Text
+depends = "depends"
 
 withTempDB :: forall b.
   FilePath -> Bool -> GraphSettings -> GraphStorageT (R.ResourceT (LoggingT IO)) b
