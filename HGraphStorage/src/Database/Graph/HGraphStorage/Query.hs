@@ -12,29 +12,34 @@ import Database.Graph.HGraphStorage.API
 import Database.Graph.HGraphStorage.FileOps
 import Database.Graph.HGraphStorage.Types
 
-
+-- | Direction to follow
 data RelationDir = OUT | IN | BOTH
   deriving (Show,Read,Eq,Ord,Bounded,Enum,Typeable)
   
+-- | One step in the query
 data RelationStep = RelationStep
-  { rsRelTypes  :: [T.Text]
-  , rsDirection :: RelationDir
-  , rsTgtTypes  :: [T.Text]
-  , rsTgtFilter :: GraphObject ObjectID -> Bool
-  , rsLimit     :: Maybe Int
+  { rsRelTypes  :: [T.Text] -- ^ Types of relations to follow (empty -> all)
+  , rsDirection :: RelationDir -- ^ Direction of relation
+  , rsTgtTypes  :: [T.Text] -- ^ Types of objects to retrieve (empty -> all)
+  , rsTgtFilter :: GraphObject ObjectID -> Bool -- ^ Condition to match on objects
+  , rsLimit     :: Maybe Int -- ^ Maximum number of relations to follow (limit applies after all other filters)
   } deriving (Typeable)
 
+-- | Default instance: navigates all out links
 instance Default RelationStep where
   def = RelationStep [] OUT [] (const True) Nothing
 
+-- | Result of a query step
 data StepResult = StepResult
-  { srRelationID :: RelationID
-  , srDirection  :: RelationDir
-  , srType       :: T.Text
-  , srProperties :: DM.Map T.Text [PropertyValue]
-  , srObject     :: GraphObject ObjectID
+  { srRelationID :: RelationID -- ^ Relation id
+  , srDirection  :: RelationDir -- ^ Direction of relation
+  , srType       :: T.Text -- ^ Type of relation
+  , srProperties :: DM.Map T.Text [PropertyValue] -- ^ Properties of relation
+  , srObject     :: GraphObject ObjectID -- ^ Target object
   } deriving (Show,Read,Eq,Ord,Typeable)
 
+
+-- | Run a one step query on one given object
 queryStep 
   :: (GraphUsableMonad m) 
   => ObjectID -> RelationStep -> GraphStorageT m [StepResult]
