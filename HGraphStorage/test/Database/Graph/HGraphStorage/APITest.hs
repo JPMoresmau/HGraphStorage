@@ -108,6 +108,22 @@ apiTests = testGroup "API tests"
         fg <- createObject (GraphObject Nothing "Movie" $ DM.fromList [("name",[PVText "Forrest Gump"]),("year",[PVInteger 1990])])
         liftIO $
           goID th @=? goID fg
+   , testCase "Edit objects" $
+      withTempDB $ do
+        th <- createObject (GraphObject Nothing "Actor" $ DM.fromList [("name",[PVText "Tom Hanks"]),("age",[PVInteger 60])])
+        let nProps= DM.fromList [("name",[PVText "Tom Hanks"]),("age",[PVInteger 61]),("hair",[PVText "curly"])]
+        th2 <- updateObject th{goProperties=nProps}
+        th3 <- getObject $ goID th2
+        let nProps2= DM.fromList [("name",[PVText "Tom Hanks"]),("hair",[PVText "curly"])]
+        th4 <- updateObject th3{goProperties=nProps2}
+        th5 <- getObject $ goID th3
+        liftIO $ do
+          goID th @=? goID th2
+          goID th @=? goID th3
+          nProps @=? goProperties th3
+          goID th @=? goID th4
+          goID th @=? goID th5
+          nProps2 @=? goProperties th5
    ]
    
 checkModel :: GraphStorageT

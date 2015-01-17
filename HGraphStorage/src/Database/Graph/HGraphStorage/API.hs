@@ -128,8 +128,18 @@ createObject obj = do
   propId <- createProperties $ goProperties obj
   nid <- write hs (goID obj) (Object tid def def propId)
   return $ obj {goID = nid}
-  where 
-  
+
+-- | Replace an object
+updateObject :: (GraphUsableMonad m) =>
+                GraphObject ObjectID -> GraphStorageT m (GraphObject ObjectID)
+updateObject obj = do
+  hs <- getHandles
+  tid <- objectType $ goType obj
+  --let props = filter (not . null . snd) $ DM.toList $ goProperties obj
+  propId <- createProperties $ goProperties obj
+  _ <- write hs (Just $ goID obj) (Object tid def def propId)
+  return $ obj
+ 
 -- | Create properties from map, returns the first ID in the chain
 createProperties 
   :: (GraphUsableMonad m)
