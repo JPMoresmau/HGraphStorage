@@ -45,6 +45,7 @@ data TrieNode k v = TrieNode
 instance (Binary k, Binary v) => Binary (TrieNode k v)
 
 
+-- | Build a file backed trie
 newFileTrie  :: forall k v. (Binary k,Binary v,Default k,Default v) => FilePath -> IO (Trie k v)
 newFileTrie file = do
   let dir = takeDirectory file
@@ -143,7 +144,7 @@ readRecord tr off = do
     bs <- BS.hGet h isz
     if BS.null bs 
       then return Nothing
-      else return $ Just $ (off,decode bs)
+      else return $ Just (off, decode bs)
   where 
     h = trHandle tr
     isz = fromIntegral $ trRecordLength tr  
@@ -169,20 +170,19 @@ lookup key tr = do
     
 
 -- | Lookup a node from a Key
-lookupNode :: (Binary k,Eq k,Binary v,Eq v,Default v) => [k] -> Trie k v -> IO (Maybe (Int64,(TrieNode k v)))
-lookupNode key tr = do
-  (readRecord tr 0) >>= lookup' key 
+lookupNode :: (Binary k,Eq k,Binary v,Eq v,Default v) => [k] -> Trie k v -> IO (Maybe (Int64, TrieNode k v))
+lookupNode key tr = readRecord tr 0 >>= lookup' key 
   where 
     lookup' [] _ = return Nothing
     lookup' _ Nothing = return Nothing
-    lookup' (k:ks) (Just (off,node)) = do
+    lookup' (k:ks) (Just (off,node)) = 
       if k == tnKey node
         then 
           if null ks
             then return $ Just (off,node)
-            else (readChildRecord tr $ tnChild node) >>= lookup' ks
+            else readChildRecord tr (tnChild node) >>= lookup' ks
         else 
-          (readChildRecord tr $ tnNext node) >>= lookup' (k:ks)
+          readChildRecord tr (tnNext node) >>= lookup' (k : ks)
 
           
 

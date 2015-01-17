@@ -221,7 +221,7 @@ createRelation' rel = do
 
 -- | list relations matchinf a filter
 filterRelations :: (GraphUsableMonad m) =>
-                ((GraphRelation RelationID ObjectID)-> GraphStorageT m Bool) -> GraphStorageT m [GraphRelation RelationID ObjectID]
+                (GraphRelation RelationID ObjectID -> GraphStorageT m Bool) -> GraphStorageT m [GraphRelation RelationID ObjectID]
 filterRelations ft = filterM ft =<< (mapM popProperties =<< readAll =<< getHandles)
   where 
     popProperties (relId,rel) = do
