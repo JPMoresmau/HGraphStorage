@@ -75,6 +75,19 @@ indexTests = testGroup "Index tests"
       equalsM (Just 961) $ GI.lookup (toInt16 "ace") tr
       equalsM (Just 945) $ GI.lookup (toInt16 "ac-machine") tr
       hClose $ trHandle tr
+    , testCase "Prefix test" $
+     withTempFile $ \f -> do
+      h <- openBinaryFile f ReadWriteMode
+      let tr :: (Trie Int16 Int16) = newTrie h
+      equalsM Nothing $ insertNew (toInt16 "A") 15 tr
+      equalsM Nothing $ insertNew (toInt16 "tea") 3 tr
+      equalsM Nothing $ insertNew (toInt16 "ted") 4 tr
+      equalsM Nothing $ insertNew (toInt16 "to") 7 tr
+      equalsM [] $ prefix (toInt16 "AB") tr
+      equalsM [((toInt16 "tea"),3)] $ prefix (toInt16 "tea") tr
+      equalsM [((toInt16 "tea"),3),((toInt16 "ted"),4)] $ prefix (toInt16 "te") tr
+      equalsM [((toInt16 "tea"),3),((toInt16 "ted"),4),((toInt16 "to"),7)] $ prefix (toInt16 "t") tr
+      equalsM [((toInt16 "A"),15),((toInt16 "tea"),3),((toInt16 "ted"),4),((toInt16 "to"),7)] $ prefix [] tr
   ]
   
 

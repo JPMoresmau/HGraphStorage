@@ -9,6 +9,7 @@ module Database.Graph.HGraphStorage.Index
   , insertNew
   , insert
   , Database.Graph.HGraphStorage.Index.lookup
+  , prefix
   , delete)
 where
 
@@ -173,7 +174,7 @@ lookup key tr = do
 lookupNode :: (Binary k,Eq k,Binary v,Eq v,Default v) => [k] -> Trie k v -> IO (Maybe (Int64, TrieNode k v))
 lookupNode key tr = readRecord tr 0 >>= lookup' key 
   where 
-    lookup' [] _ = return Nothing
+    lookup' [] r = return r
     lookup' _ Nothing = return Nothing
     lookup' (k:ks) (Just (off,node)) = 
       if k == tnKey node
@@ -184,7 +185,21 @@ lookupNode key tr = readRecord tr 0 >>= lookup' key
         else 
           readChildRecord tr (tnNext node) >>= lookup' (k : ks)
 
-          
+
+-- | Return all key and values for the given prefix which may be null (in which case all mappings are returned).
+prefix :: (Binary k,Eq k,Binary v,Eq v,Default v) => [k] -> Trie k v -> IO [([k],v)]          
+prefix key tr = lookupNode key tr >>= collect (null key) key
+  where
+    collect _ _ Nothing = return []
+    collect withNexts k (Just (_,node)) = do
+      let k' = tnKey node
+      let v = tnValue node
+      let nk = if withNexts then k++[k'] else k
+      let me = if v == def then [] else [(nk,v)]
+      subs <- readChildRecord tr (tnChild node) >>= collect True nk 
+      nexts <- if withNexts then readChildRecord tr (tnNext node) >>= collect True k else return []
+      return $ me ++ subs ++ nexts
+
 
 -- | Delete the value associated with a key
 -- This only remove the value from the trienode, it doesn't prune the trie in any way.
