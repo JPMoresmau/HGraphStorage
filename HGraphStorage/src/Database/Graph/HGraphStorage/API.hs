@@ -1,9 +1,9 @@
-{-# LANGUAGE DeriveDataTypeable, StandaloneDeriving, ConstraintKinds, FlexibleInstances, MultiParamTypeClasses, TypeFamilies, UndecidableInstances, DeriveFunctor, GeneralizedNewtypeDeriving, RankNTypes, FlexibleContexts #-}
+{-# LANGUAGE DeriveDataTypeable, StandaloneDeriving, ConstraintKinds, FlexibleInstances, MultiParamTypeClasses, TypeFamilies, UndecidableInstances, DeriveFunctor, GeneralizedNewtypeDeriving, RankNTypes, FlexibleContexts, RecordWildCards #-}
 -- | Higher level API for reading and writing
 module Database.Graph.HGraphStorage.API where
 
 import Control.Applicative
-import Control.Monad (MonadPlus, liftM, foldM, filterM, void)
+import Control.Monad (MonadPlus, liftM, foldM, filterM, void, when, unless)
 import Control.Monad.Base (MonadBase(..))
 import Control.Monad.Fix (MonadFix)
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -11,6 +11,7 @@ import Control.Monad.Trans.Class (MonadTrans(lift))
 import Control.Monad.Trans.Control ( MonadTransControl(..), MonadBaseControl(..)
                                    , ComposeSt, defaultLiftBaseWith
                                    , defaultRestoreM )
+import Control.Arrow
 
 import qualified Data.Map as DM
 import qualified Data.Text as T
@@ -28,7 +29,11 @@ import Database.Graph.HGraphStorage.FileOps
 import Database.Graph.HGraphStorage.Types
 import Control.Monad.Trans.State.Lazy
 import Database.Graph.HGraphStorage.FreeList (addToFreeList)
-import Database.Graph.HGraphStorage.Index
+import Database.Graph.HGraphStorage.Index as Idx
+import Data.Int (Int16)
+import System.Directory (doesFileExist)
+import Data.Maybe (fromMaybe, catMaybes)
+import Control.Exception.Lifted (throwIO)
 
 -- | State for the monad
 data GsData = GsData
@@ -36,7 +41,15 @@ data GsData = GsData
   , gsModel    :: Model
   , gsDir      :: FilePath
   , gsSettings :: GraphSettings
-  } 
+  , gsIndexes  :: [(IndexInfo,Trie Int16 ObjectID)]
+  }
+
+-- | Index metadata
+data IndexInfo = IndexInfo
+  { iiName  :: T.Text
+  , iiTypes :: [T.Text]
+  , iiProps :: [T.Text]
+  } deriving (Show,Read,Eq,Ord)
 
 
 -- | Run a computation with the graph storage engine, storing the data in the given directory
@@ -45,14 +58,20 @@ withGraphStorage :: forall (m :: * -> *) a.
                       MonadLogger m,
                        MonadBaseControl IO m) =>
                       FilePath -> GraphSettings -> GraphStorageT (R.ResourceT m) a -> m a
-withGraphStorage dir gs (Gs act) = R.runResourceT $ do
+withGraphStorage dir gs act = R.runResourceT $ do
   (rk,hs) <- R.allocate (open dir gs) close
   model <- readModel hs
-  res <- evalStateT act (GsData hs model dir gs)
+  res <- evalStateT (unIs loadIndexes) (GsData hs model dir gs [])
   R.release rk
   return res
-
-
+  where 
+    loadIndexes = do
+      idxf <- indexFile
+      ex <- liftIO $ doesFileExist idxf
+      when ex $ do
+        indexInfos <- liftM read $ liftIO $ readFile idxf
+        mapM_ addIndex indexInfos
+      act
 
 
 -- | Our monad transformer
@@ -118,27 +137,101 @@ getDirectory = gsDir `liftM` Gs get
 getSettings :: Monad m => GraphStorageT m GraphSettings
 getSettings = gsSettings `liftM` Gs get
 
--- | Create or replace an object
+-- | Get the current indices.
+getIndices :: Monad m => GraphStorageT m [(IndexInfo,Trie Int16 ObjectID)]
+getIndices = gsIndexes `liftM` Gs get
+
+
+indexFile :: Monad m => GraphStorageT m FilePath
+indexFile = do
+  dir <- getDirectory
+  return $ dir </> "indices"
+
+
+-- | Create or replace an object.
 createObject :: (GraphUsableMonad m) =>
                 GraphObject (Maybe ObjectID)-> GraphStorageT m (GraphObject ObjectID)
 createObject obj = do
   hs <- getHandles
   tid <- objectType $ goType obj
+  toAdd <- removeOldValuesFromIndex obj (goID obj)
   --let props = filter (not . null . snd) $ DM.toList $ goProperties obj
   propId <- createProperties $ goProperties obj
   nid <- write hs (goID obj) (Object tid def def propId)
+  insertNewValuesInIndex nid toAdd
   return $ obj {goID = nid}
 
--- | Replace an object
+-- | Replace an object.
 updateObject :: (GraphUsableMonad m) =>
                 GraphObject ObjectID -> GraphStorageT m (GraphObject ObjectID)
 updateObject obj = do
   hs <- getHandles
   tid <- objectType $ goType obj
+  toAdd <- removeOldValuesFromIndex obj (Just $ goID obj)
   --let props = filter (not . null . snd) $ DM.toList $ goProperties obj
   propId <- createProperties $ goProperties obj
   _ <- write hs (Just $ goID obj) (Object tid def def propId)
-  return $ obj
+  insertNewValuesInIndex (goID obj) toAdd
+  return obj
+ 
+-- | Checks if there is a duplicate on any applicable index. Then remove obsolete values from the index, and generate the list of values to add
+-- We'll only add the values once the object has been properly written, so we can have the ID of new objects.
+removeOldValuesFromIndex :: (GraphUsableMonad m) => GraphObject a -> Maybe ObjectID -> GraphStorageT m [(T.Text,[Trie Int16 ObjectID],[PropertyValue])]
+removeOldValuesFromIndex g mid = do
+  idxMap <- indexMap g
+  if DM.null idxMap
+    then return []
+    else do
+      oldProps <- case mid of
+        Nothing -> return DM.empty
+        Just oid -> do
+          hs <- getHandles
+          obj <- readOne hs oid
+          let pid = oFirstProperty obj
+          listProperties pid
+      let (toRem,toAdd) = foldr (removeIdx oldProps (goProperties g)) ([],[]) $ DM.assocs idxMap
+      checkDuplicates mid toAdd
+      liftIO $ mapM_ removeVals toRem
+      return toAdd
+  where
+    removeIdx oldP newP (n,tries) (toRem,toAdd) = do
+      let oldVs = fromMaybe [] $ DM.lookup n oldP
+      let newVs = fromMaybe [] $ DM.lookup n newP
+      case (oldVs,newVs) of
+        ([],[]) -> (toRem,toAdd) -- no values, nothing to do
+        (vs,[]) -> ((tries,vs):toRem,toAdd) -- no new values, remove old
+        ([],ns) -> (toRem,(n,tries,ns):toAdd) -- new values, return ref
+        (ovs,nvs)
+          | ovs == nvs -> (toRem,toAdd) -- same values, nothing to do
+          | otherwise  -> ((tries,ovs):toRem,(n,tries,nvs):toAdd)
+    removeVals (tries,vs) = mapM_ (removeVal tries) vs
+    removeVal tries v = mapM_ (delete (valueToIndex v)) tries
+    
+    
+-- | Check if duplicates exist in index.
+checkDuplicates :: (GraphUsableMonad m) => Maybe ObjectID -> [(T.Text,[Trie Int16 ObjectID],[PropertyValue])] -> GraphStorageT m ()
+checkDuplicates mid toAdd = do
+  dups <- liftIO 
+              $   filter (not . null . snd)
+                . map (second (filter (\ oid -> Just oid /= mid)))
+              <$> mapM checkDups toAdd
+  unless (null dups) $
+        liftIO $ throwIO $ DuplicateIndexKey $ map fst dups            
+  where
+    checkDups (n,tries,vs) = do
+      ids<-concat <$> mapM (checkDup tries) vs
+      return (n,ids)
+    checkDup tries v = catMaybes <$> mapM (Idx.lookup (valueToIndex v)) tries
+
+      
+-- | Insert new values in applicable indices.
+insertNewValuesInIndex :: (GraphUsableMonad m) => ObjectID -> [(T.Text,[Trie Int16 ObjectID],[PropertyValue])] -> GraphStorageT m ()
+insertNewValuesInIndex gid = liftIO . mapM_ addVals
+  where
+    addVals (_,tries,vs) = mapM_ (addVal tries) vs
+    -- We should not have duplicates here, given removeOldValuesFromIndex
+    addVal tries v = mapM_ (insert (valueToIndex v) gid) tries
+
  
 -- | Create properties from map, returns the first ID in the chain
 createProperties 
@@ -154,6 +247,7 @@ createProperties = foldM addProps def . DM.toList
       hs <- getHandles
       foldM (writeProperty hs ptid) nid vs
 
+
 -- | filter objects
 filterObjects :: (GraphUsableMonad m) =>
                 (GraphObject ObjectID -> GraphStorageT m Bool) -> GraphStorageT m [GraphObject ObjectID]
@@ -163,19 +257,26 @@ filterObjects ft = filterM ft =<< (mapM (uncurry populateObject) =<< readAll =<<
 populateObject :: (GraphUsableMonad m) =>
                     ObjectID -> Object -> GraphStorageT m (GraphObject ObjectID)
 populateObject objId obj = do
-  mdl <- getModel
   let pid = oFirstProperty obj
   pmap <- listProperties pid
-  let otid = oType obj
-  typeName <- throwIfNothing (UnknownObjectType otid) $ DM.lookup otid $ toName $ mObjectTypes mdl
+  typeName <- getTypeName obj
   return $ GraphObject objId typeName pmap
 
+-- | Get one object from its ID.
 getObject :: (GraphUsableMonad m) =>
                 ObjectID -> GraphStorageT m (GraphObject ObjectID)
 getObject gid = populateObject gid =<< flip readOne gid =<< getHandles
 
 
--- | (Internal) Build a property map by reading the property list
+-- | Get the type name for a given low level Object.
+getTypeName :: (GraphUsableMonad m) => Object -> GraphStorageT m T.Text
+getTypeName obj = do
+  mdl <- getModel
+  let otid = oType obj
+  throwIfNothing (UnknownObjectType otid) $ DM.lookup otid $ toName $ mObjectTypes mdl
+
+
+-- | (Internal) Build a property map by reading the property list.
 listProperties
   :: (GraphUsableMonad m)
   => PropertyID
@@ -308,6 +409,8 @@ deleteObject
 deleteObject oid = do
   hs <- getHandles
   obj <- readOne hs oid
+  typeName <- getTypeName obj
+  _ <- removeOldValuesFromIndex (GraphObject oid typeName DM.empty) $ Just oid
   _ <- write hs (Just oid) (def::Object)
   addToFreeList oid (hObjectFree hs)
   cleanRef False True $ oFirstFrom obj
@@ -381,7 +484,30 @@ fetchType getM setM k name build = do
       Gs $ modify (\s -> s{gsModel=mdl2})
       return newid  
 
- -- | create an index
+
+-- | Add an index to be automatically managed.
+addIndex :: (GraphUsableMonad m) => IndexInfo -> GraphStorageT m (Trie Int16 ObjectID)
+addIndex ii@(IndexInfo idxName _ props) = do
+  t <- createIndex idxName
+  Gs (modify (\s@GsData{..} ->s{ gsIndexes = (ii,t):gsIndexes} ))
+  idxf <- indexFile
+  idxs <- getIndices
+  liftIO $ writeFile idxf $ show $ map fst idxs
+  mapM_ (fillIndex t) =<< readAll =<< getHandles
+  return t
+  where
+    fillIndex :: (GraphUsableMonad m) => Trie Int16 ObjectID ->(ObjectID,Object) -> GraphStorageT m ()
+    fillIndex t (gid,obj) = do
+      typeName <- getTypeName obj
+      when (isIndexApplicable ii typeName) $ do
+        go <- populateObject gid obj
+        let toAdd = map (\(k,v)-> (k,[t],v)) $ filter (\(k,_)->k `elem` props) $ DM.assocs $ goProperties go
+        checkDuplicates (Just gid) toAdd
+        insertNewValuesInIndex gid toAdd
+        return ()
+        
+
+ -- | (Internal) Create an index.
 createIndex :: forall k v m. (Binary k,Binary v,Default k,Default v,GraphUsableMonad m) =>
                 T.Text -> GraphStorageT m (Trie k v)
 createIndex idxName =  do
@@ -391,3 +517,21 @@ createIndex idxName =  do
   gs <- getSettings
   liftIO $ setBufferMode (trHandle trie) $ gsIndexBuffering gs
   return trie
+
+
+-- | Get the indices to update, per property.
+indexMap :: (GraphUsableMonad m) => GraphObject a -> GraphStorageT m (DM.Map T.Text [Trie Int16 ObjectID])
+indexMap obj = do
+  iis <- getIndices
+  return $ foldr addPropIndex DM.empty iis
+  where
+    addPropIndex (ii,tr) dm
+      | isIndexApplicable ii (goType obj) = foldr (\prop -> DM.insertWith (++) prop [tr]) dm $ iiProps ii
+      | otherwise = dm
+ 
+
+-- | Is the given index applicable to the given object type?
+isIndexApplicable :: IndexInfo -> T.Text -> Bool
+isIndexApplicable ii typ = let
+  tps = iiTypes ii
+  in null tps || typ `elem` tps 

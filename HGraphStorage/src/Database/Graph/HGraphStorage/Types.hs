@@ -7,11 +7,12 @@ module Database.Graph.HGraphStorage.Types where
 
 import           Control.Exception.Base
 import           Data.Binary
+import           Data.Bits
 import qualified Data.ByteString.Lazy                   as BS
 import           Data.Default
 import           Data.Int
 import qualified Data.Map                               as DM
-import           Data.Text
+import qualified Data.Text                              as T
 import           Data.Typeable
 
 import           Control.Monad.Logger                   (MonadLogger)
@@ -185,9 +186,9 @@ data Handles = Handles
 
 -- | The current model: lookup tables between names and ids types of artifacts
 data Model = Model
-  { mObjectTypes   :: Lookup ObjectTypeID Text
-  , mRelationTypes :: Lookup RelationTypeID Text
-  , mPropertyTypes :: Lookup PropertyTypeID (Text,DataType)
+  { mObjectTypes   :: Lookup ObjectTypeID T.Text
+  , mRelationTypes :: Lookup RelationTypeID T.Text
+  , mPropertyTypes :: Lookup PropertyTypeID (T.Text,DataType)
   } deriving (Show,Read,Eq,Ord,Typeable)
 
 -- | Default model: a "name" property property type with a name property
@@ -228,7 +229,7 @@ dataType = toEnum . fromIntegral
 
 -- | A typed property value
 data PropertyValue =
-    PVText    Text
+    PVText    T.Text
   | PVInteger Integer
   | PVBinary  BS.ByteString
   deriving (Show,Read,Eq,Ord,Typeable)
@@ -239,6 +240,31 @@ valueType (PVText _) = DTText
 valueType (PVInteger _) = DTInteger
 valueType (PVBinary _) = DTBinary
 
+-- | Get the value in a format ready to index
+valueToIndex :: PropertyValue -> [Int16]
+valueToIndex (PVText t) = textToKey t
+valueToIndex (PVInteger i) = integerToKey i
+valueToIndex (PVBinary b) = bytestringToKey b
+
+
+-- | Transform a text in a index key
+textToKey :: T.Text  -> [Int16]
+textToKey = map (fromIntegral . fromEnum) . T.unpack
+
+-- | Transform an integer in a index key
+integerToKey :: Integer -> [Int16]
+integerToKey i = if i < maxI && i > minI
+  then [fromIntegral i]
+  else integerToKey (i `shift` (-16)) ++ [fromIntegral $ i .&. 0xFFFF]
+  where
+    maxI = fromIntegral (maxBound :: Int16)
+    minI = fromIntegral (minBound :: Int16)
+
+-- | Transform a bytestring in a index key
+bytestringToKey :: BS.ByteString -> [Int16]
+bytestringToKey = map fromIntegral . BS.unpack
+
+
 -- | The exceptions we may throw
 data GraphStorageException =
     IncoherentNamePropertyTypeID PropertyTypeID PropertyTypeID -- ^ Something is not right with the name property
@@ -247,6 +273,7 @@ data GraphStorageException =
   | MultipleNameProperty PropertyTypeID
   | UnknownObjectType ObjectTypeID
   | UnknownRelationType RelationTypeID
+  | DuplicateIndexKey [T.Text]
   deriving (Show,Read,Eq,Ord,Typeable)
 
 -- | Make our exception a standard exception

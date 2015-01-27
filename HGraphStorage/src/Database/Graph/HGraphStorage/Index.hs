@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveDataTypeable, DeriveGeneric, ScopedTypeVariables, ConstraintKinds, FlexibleContexts #-}
+{-# LANGUAGE DeriveDataTypeable, DeriveGeneric, ScopedTypeVariables, ConstraintKinds, FlexibleContexts, RankNTypes #-}
 -- | Index on disk
 -- <http://sqlity.net/en/2445/b-plus-tree>
 -- <http://en.wikipedia.org/wiki/Trie>

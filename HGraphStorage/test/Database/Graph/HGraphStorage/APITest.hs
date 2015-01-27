@@ -21,6 +21,7 @@ import qualified Control.Monad.Trans.Resource as R
 
 import Control.Monad.Logger
 import Data.Default (def)
+import Database.Graph.HGraphStorage.Index
 
 
 apiTests :: TestTree
@@ -124,6 +125,53 @@ apiTests = testGroup "API tests"
           goID th @=? goID th4
           goID th @=? goID th5
           nProps2 @=? goProperties th5
+   , testCase "Indexing one object" $
+      withTempDB $ do
+        tr<-addIndex $ IndexInfo "LastName" ["Actor"] ["lastName"]
+        allIdx0 <- liftIO $ prefix [] tr
+        th0 <- createObject (GraphObject Nothing "Actor" $ DM.fromList [("firstName",[PVText "Tom"]),("lastName",[PVText "Hanks"])])
+        allIdx1 <- liftIO $ prefix [] tr
+        _ <- updateObject (GraphObject (goID th0) "Actor" $ DM.fromList [("firstName",[PVText "Tom"]),("lastName",[PVText "Cruise"])])
+        allIdx2 <- liftIO $ prefix [] tr
+        deleteObject $ goID th0
+        allIdx3 <- liftIO $ prefix [] tr
+        liftIO $ do
+          allIdx0 @?= []
+          allIdx1 @?= [(textToKey "Hanks",goID th0)]
+          allIdx2 @?= [(textToKey "Cruise",goID th0)]
+          allIdx3 @?= []
+   , testCase "Indexing two objects" $
+      withTempDB $ do
+        tr<-addIndex $ IndexInfo "LastName" ["Actor"] ["lastName"]
+        allIdx0 <- liftIO $ prefix [] tr
+        th0 <- createObject (GraphObject Nothing "Actor" $ DM.fromList [("firstName",[PVText "Tom"]),("lastName",[PVText "Hanks"])])
+        allIdx1 <- liftIO $ prefix [] tr
+        th1 <- createObject (GraphObject Nothing "Actor" $ DM.fromList [("firstName",[PVText "Tom"]),("lastName",[PVText "Cruise"])])
+        allIdx2 <- liftIO $ prefix [] tr
+        deleteObject $ goID th0
+        allIdx3 <- liftIO $ prefix [] tr
+        liftIO $ do
+          allIdx0 @?= []
+          allIdx1 @?= [(textToKey "Hanks",goID th0)]
+          allIdx2 @?= [(textToKey "Hanks",goID th0),(textToKey "Cruise",goID th1)]       
+          allIdx3 @?= [(textToKey "Cruise",goID th1)]
+   , testCase "Create index after objects" $
+      withTempDB $ do
+       th0 <- createObject (GraphObject Nothing "Actor" $ DM.fromList [("firstName",[PVText "Tom"]),("lastName",[PVText "Hanks"])])
+       th1 <- createObject (GraphObject Nothing "Actor" $ DM.fromList [("firstName",[PVText "Tom"]),("lastName",[PVText "Cruise"])])
+       tr<-addIndex $ IndexInfo "LastName" ["Actor"] ["lastName"] 
+       allIdx0 <- liftIO $ prefix [] tr
+       liftIO $
+          allIdx0 @?= [(textToKey "Cruise",goID th1),(textToKey "Hanks",goID th0)]       
+    , testCase "Index persistence" $ do
+       let ii = IndexInfo "LastName" ["Actor"] ["lastName"]
+       dir <- withTempDB $ do
+                _<- addIndex $ ii
+                getDirectory
+       runStderrLoggingT $ withGraphStorage dir def $ do
+        idxs <- getIndices
+        liftIO $ 
+          [ii] @=? map fst idxs
    ]
    
 checkModel :: GraphStorageT

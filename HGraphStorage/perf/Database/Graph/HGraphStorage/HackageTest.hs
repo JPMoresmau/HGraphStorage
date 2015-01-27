@@ -25,8 +25,6 @@ import Database.Graph.HGraphStorage.API
 import Database.Graph.HGraphStorage.Index as Idx
 import Database.Graph.HGraphStorage.Types
 import Control.Monad.IO.Class (liftIO)
-import Data.Int
-import Data.Maybe
 import Data.Default (def)
 import Database.Graph.HGraphStorage.Query
 
@@ -124,16 +122,14 @@ getSubDirs folder = do
 
 writeGraph :: GraphSettings -> DM.Map T.Text (DM.Map T.Text [(T.Text,T.Text)]) -> IO ()
 writeGraph gs memGraph = withTempDB "hackage-test-graph" True gs $ do
-  indexPackageNames <- createIndex "packageNames"
-  pkgMap <- foldM (createPackage indexPackageNames) DM.empty $ DM.keys memGraph
+  --indexPackageNames <- createIndex "packageNames"
+  _ <- addIndex $ IndexInfo "packageNames" ["Package"] ["name"]
+  pkgMap <- foldM createPackage DM.empty $ DM.keys memGraph
   mapM_ (createVersions pkgMap) $ DM.toList memGraph
   where
-    createPackage indexPackageNames m pkg = do
+    createPackage m pkg = do
       goPkg <- createObject $ GraphObject Nothing "Package" $ DM.fromList [("name",[PVText pkg])]
       --liftIO $ putStrLn $ (T.unpack pkg) ++"->" ++ (show $ textToKey pkg) ++ ":" ++ (show $ goID goPkg)
-      let key = textToKey pkg
-      mex <- liftIO $ Idx.insert key (goID goPkg) indexPackageNames
-      when (isJust mex) $ error $ "duplicate index: " ++ T.unpack pkg ++"->" ++ show key ++ ":" ++ show mex
       -- ml <- liftIO $ Idx.lookup key indexPackageNames
       -- when (Just (goID goPkg) /= ml) $ error $ "wrong lookup: "++ (show key) ++ "->" ++ show ml
       return $ DM.insert pkg goPkg m
@@ -153,7 +149,8 @@ writeGraph gs memGraph = withTempDB "hackage-test-graph" True gs $ do
     
 nameIndex :: DM.Map T.Text (DM.Map T.Text [(T.Text,T.Text)]) -> IO ()
 nameIndex memGraph = withTempDB "hackage-test-graph" False def $ do
-  indexPackageNames :: Trie Int16 ObjectID <- createIndex "packageNames"
+  indexPackageNames <- (snd . head) <$> getIndices
+  -- :: Trie Int16 ObjectID <- createIndex "packageNames"
   let ks = DM.keys memGraph
   let pkgLen = length ks
   pkgMap <- foldM (getPackage indexPackageNames) DM.empty ks
@@ -169,7 +166,8 @@ nameIndex memGraph = withTempDB "hackage-test-graph" False def $ do
 
 yesodQuery :: IO Int
 yesodQuery  = withTempDB "hackage-test-graph" False def $ do
-  indexPackageNames :: Trie Int16 ObjectID <- createIndex "packageNames"
+  indexPackageNames <- (snd . head) <$> getIndices 
+  -- :: Trie Int16 ObjectID <- createIndex "packageNames"
   mid <- liftIO $ Idx.lookup (textToKey "yesod") indexPackageNames
   case mid of
     Just oid -> do
@@ -179,9 +177,6 @@ yesodQuery  = withTempDB "hackage-test-graph" False def $ do
       return l
     _ -> error "empty lookup for yesod"
 
-    
-textToKey :: T.Text  -> [Int16]
-textToKey = map (fromIntegral . fromEnum) . T.unpack
 
 versions :: T.Text
 versions = "versions"
