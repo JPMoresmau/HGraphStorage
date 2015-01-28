@@ -1,6 +1,6 @@
 name:           HGraphStorage
-version:        0.1
-cabal-version:  >=1.8
+version:        0.0.1
+cabal-version:  >= 1.8
 build-type:     Simple
 author:         JP Moresmau <jp@moresmau.fr>
 maintainer:     JP Moresmau <jp@moresmau.fr>
@@ -8,8 +8,12 @@ stability:      experimental
 category:       Database
 homepage:       https://github.com/JPMoresmau/HGraphStorage
 synopsis:       Graph database stored on disk
-description:    A graph database storing its data on disk.
-copyright:      JP Moresmau 2014
+description:    
+                A graph database storing its data on disk.
+                There is currently no transaction or even concurrent access support, this is not made for production.
+                We try to store the data on disk efficiently, i.e. not rely on having the data in memory.
+                There is a test suite and a benchmark, which would be the best way to get a feel for how the library works.
+copyright:      JP Moresmau 2014-2015
 license:        BSD3
 license-file:   LICENSE
 
@@ -40,24 +44,24 @@ library
                    Database.Graph.HGraphStorage.FreeList,
                    Database.Graph.HGraphStorage.Index
 
-executable HGraphStorage
-  hs-source-dirs:  exe
-  main-is:         Main.hs
-  build-depends:   
-                   base >= 4, HGraphStorage, binary,
-                   filepath,
-                   directory,
-                   bytestring,
-                   text,
-                   data-default,
-                   containers,
-                   lifted-base,
-                   transformers-base,
-                   transformers,
-                   monad-control,
-                   monad-logger,
-                   resourcet
-  ghc-options:     -Wall
+--executable HGraphStorage
+--  hs-source-dirs:  exe
+--  main-is:         Main.hs
+--  build-depends:   
+--                   base >= 4, HGraphStorage, binary,
+--                   filepath,
+--                   directory,
+--                   bytestring,
+--                   text,
+--                   data-default,
+--                   containers,
+--                   lifted-base,
+--                   transformers-base,
+--                   transformers,
+--                   monad-control,
+--                   monad-logger,
+--                   resourcet
+--  ghc-options:     -Wall
 
 source-repository head
   type:      git
