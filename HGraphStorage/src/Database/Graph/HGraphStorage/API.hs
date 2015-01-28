@@ -70,7 +70,7 @@ withGraphStorage dir gs act = R.runResourceT $ do
       ex <- liftIO $ doesFileExist idxf
       when ex $ do
         indexInfos <- liftM read $ liftIO $ readFile idxf
-        mapM_ addIndex indexInfos
+        mapM_ (addIndex' False) indexInfos
       act
 
 
@@ -487,13 +487,17 @@ fetchType getM setM k name build = do
 
 -- | Add an index to be automatically managed.
 addIndex :: (GraphUsableMonad m) => IndexInfo -> GraphStorageT m (Trie Int16 ObjectID)
-addIndex ii@(IndexInfo idxName _ props) = do
+addIndex = addIndex' True
+
+-- | Add an index to be automatically managed.
+addIndex' :: (GraphUsableMonad m) => Bool -> IndexInfo -> GraphStorageT m (Trie Int16 ObjectID)
+addIndex' indexExisting ii@(IndexInfo idxName _ props) = do
   t <- createIndex idxName
   Gs (modify (\s@GsData{..} ->s{ gsIndexes = (ii,t):gsIndexes} ))
   idxf <- indexFile
   idxs <- getIndices
   liftIO $ writeFile idxf $ show $ map fst idxs
-  getHandles >>= \hs->foldAll hs (fillIndex t) ()
+  when indexExisting $ getHandles >>= \hs->foldAll hs (fillIndex t) ()
   return t
   where
     fillIndex :: (GraphUsableMonad m) => Trie Int16 ObjectID -> () -> (ObjectID,Object) -> GraphStorageT m ()
