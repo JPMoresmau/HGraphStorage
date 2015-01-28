@@ -144,21 +144,26 @@ readGeneric h sz a =
     decode <$> BS.hGet h (fromIntegral sz)
 
 -- | Read all binary objects from a given handle, generating their IDs from their offset
-readAllGeneric :: (GraphUsableMonad m)
-  => (Integral a, Eq b, Binary b, Default b) => Handle -> Int64 -> m [(a,b)]
-readAllGeneric h sz = liftIO $ do
-  hSeek h AbsoluteSeek 0
-  go (fromIntegral sz) 0 []
-  where go isz a l = do
-            bs <- BS.hGet h isz
+readAll :: (GraphUsableMonad m,GraphIdSerializable a b) => Handles -> m [(a,b)]
+readAll hs = foldAll hs (\a b->return $ b:a) []
+
+-- | Read all binary objects from a given handle, generating their IDs from their offset
+foldAllGeneric :: (GraphUsableMonad m)
+  => (Integral a, Eq b, Binary b, Default b) => Handle -> Int64 
+  -> (c -> (a,b) -> m c) -> c -> m c
+foldAllGeneric h sz f st = do
+  liftIO $ hSeek h AbsoluteSeek 0
+  go (fromIntegral sz) 0 st
+  where go isz a st2 = do
+            bs <- liftIO $ BS.hGet h isz
             if BS.null bs
-              then return l
+              then return st2
               else do
                 let b = decode bs
                     i = a + 1
-                    l2 = if b == def
-                           then l
-                           else (i,b):l
+                l2 <- if b == def
+                         then return st2
+                         else f st2 (i,b)
                 go isz i l2
 
 -- | Read all properties, starting from a given one, with an optional filter on the Property Type
@@ -217,41 +222,42 @@ readPropertyValue hs dt off len = do
 class (Integral a, Binary b) => GraphIdSerializable a b where
   write   :: (GraphUsableMonad m) => Handles -> Maybe a -> b -> m a
   readOne :: (GraphUsableMonad m) => Handles -> a -> m b
-  readAll :: (GraphUsableMonad m) => Handles -> m [(a,b)]
+  foldAll :: (GraphUsableMonad m) => Handles -> (c -> (a,b) -> m c) -> c -> m c
+
 
 -- | Serialization methods for ObjectID + Object
 instance GraphIdSerializable ObjectID Object where
   write hs = writeGeneric (hObjects hs) (Just $ hObjectFree hs) objectSize
   readOne hs  = readGeneric (hObjects hs) objectSize
-  readAll hs = readAllGeneric(hObjects hs) objectSize
+  foldAll hs = foldAllGeneric(hObjects hs) objectSize
 
 -- | Serialization methods for RelationID + Relation
 instance GraphIdSerializable RelationID Relation where
   write hs = writeGeneric (hRelations hs) (Just $ hRelationFree hs)  relationSize
   readOne hs  = readGeneric (hRelations hs) relationSize
-  readAll hs = readAllGeneric(hRelations hs) relationSize
+  foldAll hs = foldAllGeneric(hRelations hs) relationSize
   
 -- | Serialization methods for PropertyID + Property
 instance GraphIdSerializable PropertyID Property where
   write hs = writeGeneric (hProperties hs) (Just $ hPropertyFree hs)  propertySize
   readOne hs  = readGeneric (hProperties hs) propertySize
-  readAll hs = readAllGeneric(hProperties hs) propertySize
+  foldAll hs = foldAllGeneric(hProperties hs) propertySize
 
 -- | Serialization methods for PropertyTypeID + PropertyType  
 instance GraphIdSerializable PropertyTypeID PropertyType where
   write hs = writeGeneric (hPropertyTypes hs) Nothing propertyTypeSize
   readOne hs  = readGeneric (hPropertyTypes hs) propertyTypeSize
-  readAll hs = readAllGeneric(hPropertyTypes hs) propertyTypeSize
+  foldAll hs = foldAllGeneric(hPropertyTypes hs) propertyTypeSize
 
 -- | Serialization methods for ObjectTypeID + ObjectType  
 instance GraphIdSerializable ObjectTypeID ObjectType where
   write hs = writeGeneric (hObjectTypes hs) Nothing objectTypeSize
   readOne hs  = readGeneric (hObjectTypes hs) objectTypeSize
-  readAll hs = readAllGeneric(hObjectTypes hs) objectTypeSize
+  foldAll hs = foldAllGeneric(hObjectTypes hs) objectTypeSize
 
 -- | Serialization methods for RelationTypeID + RelationType  
 instance GraphIdSerializable RelationTypeID RelationType where
   write hs = writeGeneric (hRelationTypes hs) Nothing relationTypeSize
   readOne hs  = readGeneric (hRelationTypes hs) relationTypeSize
-  readAll hs = readAllGeneric(hRelationTypes hs) relationTypeSize
+  foldAll hs = foldAllGeneric(hRelationTypes hs) relationTypeSize
  

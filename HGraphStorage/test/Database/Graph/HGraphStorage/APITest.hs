@@ -162,11 +162,11 @@ apiTests = testGroup "API tests"
        tr<-addIndex $ IndexInfo "LastName" ["Actor"] ["lastName"] 
        allIdx0 <- liftIO $ prefix [] tr
        liftIO $
-          allIdx0 @?= [(textToKey "Cruise",goID th1),(textToKey "Hanks",goID th0)]       
+          allIdx0 @?= [(textToKey "Hanks",goID th0),(textToKey "Cruise",goID th1)]       
     , testCase "Index persistence" $ do
        let ii = IndexInfo "LastName" ["Actor"] ["lastName"]
        dir <- withTempDB $ do
-                _<- addIndex $ ii
+                _<- addIndex ii
                 getDirectory
        runStderrLoggingT $ withGraphStorage dir def $ do
         idxs <- getIndices

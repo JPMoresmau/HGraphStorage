@@ -493,11 +493,11 @@ addIndex ii@(IndexInfo idxName _ props) = do
   idxf <- indexFile
   idxs <- getIndices
   liftIO $ writeFile idxf $ show $ map fst idxs
-  mapM_ (fillIndex t) =<< readAll =<< getHandles
+  getHandles >>= \hs->foldAll hs (fillIndex t) ()
   return t
   where
-    fillIndex :: (GraphUsableMonad m) => Trie Int16 ObjectID ->(ObjectID,Object) -> GraphStorageT m ()
-    fillIndex t (gid,obj) = do
+    fillIndex :: (GraphUsableMonad m) => Trie Int16 ObjectID -> () -> (ObjectID,Object) -> GraphStorageT m ()
+    fillIndex t _ (gid,obj) = do
       typeName <- getTypeName obj
       when (isIndexApplicable ii typeName) $ do
         go <- populateObject gid obj
