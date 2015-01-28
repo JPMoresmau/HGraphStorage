@@ -20,7 +20,7 @@ license-file:   LICENSE
 library
   hs-source-dirs:   src
   build-depends:    
-                   base >= 4,
+                   base >= 4 && < 5,
                    binary,
                    filepath,
                    directory,
@@ -72,8 +72,13 @@ test-suite hgraphstorage-test
   main-is:         hgraphstorage-test.hs
   ghc-options:     -Wall -rtsopts
   build-depends:   
-                   base >= 4, tasty > 0.10, tasty-hunit, HUnit, tasty-quickcheck, QuickCheck,tasty-ant-xml,
-                   HGraphStorage,
+                   base  >= 4 && < 5,
+                    HGraphStorage,
+                   tasty > 0.10,
+                   tasty-hunit,
+                   HUnit,
+                   tasty-quickcheck,
+                   QuickCheck,
                    filepath,
                    directory,
                    bytestring,
@@ -97,7 +102,8 @@ test-suite hgraphstorage-test
 benchmark HGraphStorage-bench
   type:            exitcode-stdio-1.0
   build-depends:   
-                   base >= 4,HGraphStorage,
+                   base  >= 4 && < 5,
+                   HGraphStorage,
                    bytestring,
                    zlib ,
                    tar,
