@@ -86,14 +86,14 @@ instance MonadBase b m => MonadBase b (GraphStorageT m) where
     liftBase = lift . liftBase
 
 instance MonadTransControl GraphStorageT where
-    newtype StT GraphStorageT a = GsStT { unGsStT :: StT (StateT GsData) a }
-    liftWith f = Gs $ liftWith (\run -> f (liftM GsStT . run . unIs))
-    restoreT = Gs . restoreT . liftM unGsStT
+    type StT GraphStorageT a = StT (StateT GsData) a
+    liftWith f = Gs $ liftWith (\run -> f (run . unIs))
+    restoreT = Gs . restoreT
 
 instance MonadBaseControl b m => MonadBaseControl b (GraphStorageT m) where
-    newtype StM (GraphStorageT m) a = StMT {unStMT :: ComposeSt GraphStorageT m a}
-    liftBaseWith = defaultLiftBaseWith StMT
-    restoreM = defaultRestoreM unStMT
+    type StM (GraphStorageT m) a = ComposeSt GraphStorageT m a
+    liftBaseWith = defaultLiftBaseWith
+    restoreM = defaultRestoreM
 
 instance (MonadLogger m) => MonadLogger (GraphStorageT m) where
    monadLoggerLog loc src lvl msg=lift $ monadLoggerLog loc src lvl msg
