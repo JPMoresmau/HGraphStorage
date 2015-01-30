@@ -74,27 +74,31 @@ withGraphStorage dir gs act = R.runResourceT $ do
       act
 
 
--- | Our monad transformer
+-- | Our monad transformer.
 newtype GraphStorageT m a = Gs { unIs :: StateT GsData m a }
     deriving ( Functor, Applicative, Alternative, Monad
              , MonadFix, MonadPlus, MonadIO, MonadTrans
              , R.MonadThrow )
-
+-- | Monad Resource instance.
 deriving instance R.MonadResource m => R.MonadResource (GraphStorageT m)
 
+-- | Monad Base instance.
 instance MonadBase b m => MonadBase b (GraphStorageT m) where
     liftBase = lift . liftBase
 
+-- | Monad Trans Control instance.
 instance MonadTransControl GraphStorageT where
     type StT GraphStorageT a = StT (StateT GsData) a
     liftWith f = Gs $ liftWith (\run -> f (run . unIs))
     restoreT = Gs . restoreT
 
+-- | Monad Base Control instance.
 instance MonadBaseControl b m => MonadBaseControl b (GraphStorageT m) where
     type StM (GraphStorageT m) a = ComposeSt GraphStorageT m a
     liftBaseWith = defaultLiftBaseWith
     restoreM = defaultRestoreM
 
+-- | MonadLogger instance.
 instance (MonadLogger m) => MonadLogger (GraphStorageT m) where
    monadLoggerLog loc src lvl msg=lift $ monadLoggerLog loc src lvl msg
 
@@ -102,14 +106,14 @@ instance (MonadLogger m) => MonadLogger (GraphStorageT m) where
 --data Graph = Graph [GraphObject] [GraphRelation]
 --  deriving (Show,Read,Eq,Ord,Typeable)
 
--- | An object with a type and properties
+-- | An object with a type and properties.
 data GraphObject a = GraphObject
   { goID         :: a
   , goType       :: T.Text
   , goProperties :: DM.Map T.Text [PropertyValue]
   } deriving (Show,Read,Eq,Ord,Typeable)
 
--- | A relation between two objects, with a type and properties
+-- | A relation between two objects, with a type and properties.
 data GraphRelation a b = GraphRelation
   { grID         :: a
   , grFrom       :: GraphObject b
@@ -141,7 +145,7 @@ getSettings = gsSettings `liftM` Gs get
 getIndices :: Monad m => GraphStorageT m [(IndexInfo,Trie Int16 ObjectID)]
 getIndices = gsIndexes `liftM` Gs get
 
-
+-- | The file used to store the index information.
 indexFile :: Monad m => GraphStorageT m FilePath
 indexFile = do
   dir <- getDirectory
@@ -511,7 +515,7 @@ addIndex' indexExisting ii@(IndexInfo idxName _ props) = do
         return ()
         
 
- -- | (Internal) Create an index.
+-- | (Internal) Create an index.
 createIndex :: forall k v m. (Binary k,Binary v,Default k,Default v,GraphUsableMonad m) =>
                 T.Text -> GraphStorageT m (Trie k v)
 createIndex idxName =  do

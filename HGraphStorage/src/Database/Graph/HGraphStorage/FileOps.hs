@@ -1,4 +1,5 @@
 {-# LANGUAGE RecordWildCards, MultiParamTypeClasses, TypeSynonymInstances,OverloadedStrings, FlexibleContexts, ConstraintKinds, ExplicitForAll, ScopedTypeVariables  #-}
+-- | Operations on the data files
 module Database.Graph.HGraphStorage.FileOps where
 
 import Control.Applicative
@@ -26,7 +27,7 @@ import Control.Exception.Lifted (throwIO)
 import Control.Monad.IO.Class (liftIO)
 import Database.Graph.HGraphStorage.FreeList
 
--- | Open all the file handles
+-- | Open all the file handles.
 open :: FilePath -> GraphSettings -> IO Handles
 open dir gs = do
   createDirectoryIfMissing True dir
@@ -57,7 +58,8 @@ open dir gs = do
           ex <- doesFileExist f
           when ex $ removeFile f)
           
-          
+
+-- | Set the buffer mode on the given handle, if provided.          
 setBufferMode :: Handle -> Maybe BufferMode -> IO()
 setBufferMode _ Nothing = return ()
 setBufferMode h (Just bm) = hSetBuffering h bm
