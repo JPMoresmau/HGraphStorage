@@ -39,3 +39,6 @@ propertyValuesFile = "propertyvalues.db"
 -- | Prefix for free list files
 freePrefix :: FilePath
 freePrefix = "free-"
+
+maxIDsFile :: FilePath
+maxIDsFile = "maxids.db"

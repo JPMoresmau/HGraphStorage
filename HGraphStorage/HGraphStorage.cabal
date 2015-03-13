@@ -33,7 +33,9 @@ library
                    transformers,
                    monad-control >= 1.0,
                    monad-logger,
-                   resourcet
+                   resourcet,
+                   mmap,
+                   storable-record
   ghc-options:      -Wall
   other-modules:    Database.Graph.HGraphStorage.Constants
   exposed-modules:  
@@ -42,25 +44,8 @@ library
                    Database.Graph.HGraphStorage.Types,
                    Database.Graph.HGraphStorage.Query,
                    Database.Graph.HGraphStorage.FreeList,
-                   Database.Graph.HGraphStorage.Index
-
---executable HGraphStorage
---  hs-source-dirs:  exe
---  main-is:         Main.hs
---  build-depends:   
---                   base >= 4, HGraphStorage, binary,
---                   filepath,
---                   directory,
---                   bytestring,
---                   text,
---                   data-default,
---                   containers,
---                   lifted-base,
---                   transformers-base,
---                   transformers,
---                   monad-control,
---                   monad-logger,
---                   resourcet
+                   Database.Graph.HGraphStorage.Index,
+                   Database.Graph.HGraphStorage.LowLevel.MMapHandle
 --  ghc-options:     -Wall
 
 source-repository head
@@ -90,13 +75,16 @@ test-suite hgraphstorage-test
                    transformers,
                    monad-control >= 1.0,
                    monad-logger,
-                   resourcet
+                   resourcet,
+                   mmap,
+                   storable-record
   other-modules:   
                   Database.Graph.HGraphStorage.APITest,
                   Database.Graph.HGraphStorage.QueryTest,
                   Database.Graph.HGraphStorage.Utils,
                   Database.Graph.HGraphStorage.FreeListTest,
-                  Database.Graph.HGraphStorage.IndexTest
+                  Database.Graph.HGraphStorage.IndexTest,
+                  Database.Graph.HGraphStorage.LowLevel.MMapTest
   hs-source-dirs:  test
 
 benchmark HGraphStorage-bench
@@ -119,7 +107,9 @@ benchmark HGraphStorage-bench
                    binary,
                    text-binary,
                    data-default,
-                   transformers
+                   transformers,
+                   mmap,
+                   storable-record
   hs-source-dirs:  perf
   ghc-options:     -Wall -rtsopts
   main-is:         Main.hs

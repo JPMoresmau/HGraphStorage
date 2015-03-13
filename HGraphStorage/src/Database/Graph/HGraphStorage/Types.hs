@@ -5,6 +5,7 @@
 -- | Base types and simple functions on them
 module Database.Graph.HGraphStorage.Types where
 
+import           Control.Applicative
 import           Control.Exception.Base
 import           Data.Binary
 import           Data.Bits
@@ -20,10 +21,12 @@ import           Control.Monad.Trans.Control            (MonadBaseControl)
 import qualified Control.Monad.Trans.Resource           as R
 import           GHC.Generics                           (Generic)
 import           System.IO
+import Foreign.Storable.Record  as Store
 
 import           Database.Graph.HGraphStorage.Constants
 import           Database.Graph.HGraphStorage.FreeList
-
+import           Database.Graph.HGraphStorage.LowLevel.MMapHandle
+import Foreign.Storable
 
 -- | put our constraints in one synonym
 type GraphUsableMonad m=(MonadBaseControl IO m, R.MonadResource m, MonadLogger m)
@@ -71,6 +74,21 @@ instance Binary Object
 instance Default Object where
   def = Object 0 0 0 0
 
+storeObject :: Store.Dictionary Object
+storeObject = Store.run $
+  Object 
+     <$> Store.element oType
+     <*> Store.element oFirstFrom
+     <*> Store.element oFirstTo
+     <*> Store.element oFirstProperty
+
+
+instance Storable Object where
+    sizeOf = Store.sizeOf storeObject
+    alignment = Store.alignment storeObject
+    peek = Store.peek storeObject
+    poke = Store.poke storeObject
+
 -- | Size of an object record
 objectSize :: Int64
 objectSize = binLength (def::Object)
@@ -98,6 +116,25 @@ instance Binary Relation
 instance Default Relation where
   def  = Relation 0 0 0 0 0 0 0 0
 
+storeRelation :: Store.Dictionary Relation
+storeRelation = Store.run $
+  Relation 
+     <$> Store.element rFrom
+     <*> Store.element rFromType
+     <*> Store.element rTo
+     <*> Store.element rToType
+     <*> Store.element rType
+     <*> Store.element rFromNext
+     <*> Store.element rToNext
+     <*> Store.element rFirstProperty
+
+
+instance Storable Relation where
+    sizeOf = Store.sizeOf storeRelation
+    alignment = Store.alignment storeRelation
+    peek = Store.peek storeRelation
+    poke = Store.poke storeRelation
+
 -- | size of a relation record
 relationSize :: Int64
 relationSize =  binLength (def::Relation)
@@ -117,6 +154,20 @@ instance Binary Property
 instance Default Property where
   def = Property 0 0 0 0
 
+storeProperty :: Store.Dictionary Property
+storeProperty = Store.run $
+  Property 
+     <$> Store.element pType
+     <*> Store.element pNext
+     <*> Store.element pOffset
+     <*> Store.element pLength
+
+instance Storable Property where
+    sizeOf = Store.sizeOf storeProperty
+    alignment = Store.alignment storeProperty
+    peek = Store.peek storeProperty
+    poke = Store.poke storeProperty
+
 -- | size of a property record
 propertySize :: Int64
 propertySize = binLength (def::Property)
@@ -134,6 +185,18 @@ instance Binary PropertyType
 instance Default PropertyType where
   def = PropertyType 0 0
 
+storePropertyType :: Store.Dictionary PropertyType
+storePropertyType = Store.run $
+  PropertyType 
+     <$> Store.element ptDataType
+     <*> Store.element ptFirstProperty
+
+instance Storable PropertyType where
+    sizeOf = Store.sizeOf storePropertyType
+    alignment = Store.alignment storePropertyType
+    peek = Store.peek storePropertyType
+    poke = Store.poke storePropertyType
+
 -- | size of a property type record
 propertyTypeSize :: Int64
 propertyTypeSize = binLength (def::PropertyType)
@@ -150,6 +213,17 @@ instance Binary ObjectType
 instance Default ObjectType where
   def = ObjectType 0
 
+storeObjectType :: Store.Dictionary ObjectType
+storeObjectType = Store.run $
+  ObjectType 
+     <$> Store.element otFirstProperty
+
+instance Storable ObjectType where
+    sizeOf = Store.sizeOf storeObjectType
+    alignment = Store.alignment storeObjectType
+    peek = Store.peek storeObjectType
+    poke = Store.poke storeObjectType
+
 -- | Size of an object type record
 objectTypeSize :: Int64
 objectTypeSize = binLength (def::ObjectType)
@@ -157,7 +231,7 @@ objectTypeSize = binLength (def::ObjectType)
 -- | Type of a relation as represented in the relation type file
 data RelationType = RelationType
   { rtFirstProperty :: PropertyID -- ^ First property of the type itself
-  }deriving (Show,Read,Eq,Ord,Typeable,Generic)
+  } deriving (Show,Read,Eq,Ord,Typeable,Generic)
 
 -- | simple binary instance
 instance Binary RelationType
@@ -165,6 +239,17 @@ instance Binary RelationType
 -- | simple default instance
 instance Default RelationType where
   def = RelationType 0
+
+storeRelationType :: Store.Dictionary RelationType
+storeRelationType = Store.run $
+  RelationType 
+     <$> Store.element rtFirstProperty
+
+instance Storable RelationType where
+    sizeOf = Store.sizeOf storeRelationType
+    alignment = Store.alignment storeRelationType
+    peek = Store.peek storeRelationType
+    poke = Store.poke storeRelationType
 
 -- | Size of a relation type record
 relationTypeSize :: Int64
@@ -176,14 +261,63 @@ data Handles = Handles
   , hObjectFree     :: FreeList ObjectID
   , hObjectTypes    :: Handle
   , hRelations      :: Handle
-  , hRelationFree   :: FreeList ObjectID
+  , hRelationFree   :: FreeList RelationID
   , hRelationTypes  :: Handle
   , hProperties     :: Handle
-  , hPropertyFree   :: FreeList ObjectID
+  , hPropertyFree   :: FreeList PropertyID
   , hPropertyTypes  :: Handle
   , hPropertyValues :: Handle
   }
+  | MMHandles
+  { mhObjects        :: MMapHandle Object
+  , hObjectFree      :: FreeList ObjectID
+  , mhObjectTypes    :: MMapHandle ObjectType
+  , mhRelations      :: MMapHandle Relation
+  , hRelationFree    :: FreeList RelationID
+  , mhRelationTypes  :: MMapHandle RelationType
+  , mhProperties     :: MMapHandle Property
+  , hPropertyFree    :: FreeList PropertyID
+  , mhPropertyTypes  :: MMapHandle PropertyType
+  , mhPropertyValues :: MMapHandle Word8
+  , mhMaxIDs         :: MMapHandle MaxIDs
+  }
 
+data MaxIDs = MaxIDs 
+  { miObject :: ObjectID
+  , miObjectType :: ObjectTypeID
+  , miRelation :: RelationID
+  , miRelationType :: RelationTypeID
+  , miProperty :: PropertyID
+  , miPropertyType :: PropertyTypeID
+  , miPropertyOffset :: PropertyValueOffset
+  }  deriving (Show,Read,Eq,Ord,Typeable,Generic)
+
+-- | simple binary instance
+instance Binary MaxIDs
+
+
+-- | simple default instance
+instance Default MaxIDs where
+  def = MaxIDs def def def def def def def
+
+storeMaxIDs :: Store.Dictionary MaxIDs
+storeMaxIDs = Store.run $
+  MaxIDs 
+     <$> Store.element miObject
+     <*> Store.element miObjectType
+     <*> Store.element miRelation
+     <*> Store.element miRelationType
+     <*> Store.element miProperty
+     <*> Store.element miPropertyType
+     <*> Store.element miPropertyOffset
+
+instance Storable MaxIDs where
+    sizeOf = Store.sizeOf storeMaxIDs
+    alignment = Store.alignment storeMaxIDs
+    peek = Store.peek storeMaxIDs
+    poke = Store.poke storeMaxIDs
+ 
+  
 -- | The current model: lookup tables between names and ids types of artifacts
 data Model = Model
   { mObjectTypes   :: Lookup ObjectTypeID T.Text
@@ -284,8 +418,10 @@ data GraphSettings = GraphSettings
   { gsMainBuffering  :: Maybe BufferMode
   , gsFreeBuffering  :: Maybe BufferMode
   , gsIndexBuffering :: Maybe BufferMode
+  , gsUseMMap        :: Bool
   } deriving (Show,Read,Eq,Ord,Typeable)
 
 -- | Default instance for settings
 instance Default GraphSettings where
-  def = GraphSettings Nothing Nothing Nothing
+  def = GraphSettings Nothing Nothing Nothing True
+
