@@ -97,17 +97,17 @@ close Handles{..} = do
   hClose hPropertyTypes
   hClose hPropertyValues
 close MMHandles{..} = do
-  closeMM mhObjects
+  closeMmap mhObjects
   _  <- closeFreeList hObjectFree
-  closeMM mhObjectTypes
-  closeMM mhRelations
+  closeMmap mhObjectTypes
+  closeMmap mhRelations
   _ <- closeFreeList hRelationFree
-  closeMM mhRelationTypes
-  closeMM mhProperties
+  closeMmap mhRelationTypes
+  closeMmap mhProperties
   _ <- closeFreeList hPropertyFree
-  closeMM mhPropertyTypes
-  closeMM mhPropertyValues
-  closeMM mhMaxIDs
+  closeMmap mhPropertyTypes
+  closeMmap mhPropertyValues
+  closeMmap mhMaxIDs
 
 -- | Read the current model from the handles
 -- generate a default model if none present (new db)
@@ -169,6 +169,9 @@ writeGeneric h mf sz Nothing b = do
       BS.hPut h $ encode b 
       return $ fromInteger a + 1
 
+-- | Generic write operation: write the given binary using the given ID and record size on the given mmap handle
+-- if no id, we write at then end
+-- otherwise we always ensure that we write at the proper offset, which is why we have fixed length records
 writeGenericMM :: (GraphUsableMonad m)
   => (Integral a, Binary a, Default a, Storable b) => MMapHandle b -> Maybe (FreeList a) -> MMapHandle MaxIDs -> (MMapHandle MaxIDs -> IO a)
   -> Maybe a -> b -> m a
@@ -193,7 +196,7 @@ readGeneric h sz a =
     hSeek h AbsoluteSeek (toInteger (a - 1) * toInteger sz)
     decode <$> BS.hGet h (fromIntegral sz)
 
--- | Read a binary with a given ID from the given handle
+-- | Read a binary with a given ID from the given mmap handle
 readGenericMM :: (GraphUsableMonad m)
   => (Integral a, Storable b) => MMapHandle b -> b -> a  -> m b
 readGenericMM h b a = liftIO $ peekMM h ((fromIntegral a - 1) * sizeOf b)
@@ -222,12 +225,12 @@ foldAllGeneric h sz f st = do
                          else f st2 (i,b)
                 go isz i l2
 
--- | Read all binary objects from a given handle, generating their IDs from their offset
+-- | Read all binary objects from a given mmap handle, generating their IDs from their offset
 foldAllGenericMM 
   :: (GraphUsableMonad m,Integral a, Eq b, Storable b, Default b) 
   => MMapHandle b -> b
   -> (c -> (a,b) -> m c) -> c -> a -> m c
-foldAllGenericMM h d f st maxID = do
+foldAllGenericMM h d f st maxID =
   go 0 st
   where go a st2 = do
             b <- liftIO $ peekMM h (fromIntegral a*sizeOf d)
@@ -275,6 +278,7 @@ writeProperty hs@MMHandles{..} ptid nextid v = do
     return off
   write hs Nothing $ Property ptid nextid off (BS.length bs) 
 
+-- | Convert a property value to a bytestring
 toBin :: PropertyValue -> BS.ByteString
 toBin (PVBinary bs) = bs
 toBin (PVText t) = fromStrict $ encodeUtf8 t
@@ -298,6 +302,7 @@ readPropertyValue MMHandles{..} dt off len = do
   let h = mhPropertyValues
   liftIO $ toValue dt <$> peekMMBS h (fromIntegral off) (fromIntegral len)
 
+-- | Convert a bytestring to a propertyvalue
 toValue :: DataType -> BS.ByteString -> PropertyValue
 toValue DTBinary  = PVBinary
 toValue DTText    = PVText . decodeUtf8 . toStrict
@@ -366,13 +371,15 @@ instance GraphIdSerializable RelationTypeID RelationType where
   foldAll Handles{..} = foldAllGeneric hRelationTypes relationTypeSize
   foldAll MMHandles{..} = ((((liftIO $ lastRelationTypeID mhMaxIDs) >>=) .) .) (foldAllGenericMM mhRelationTypes def)
  
- 
+-- | Read max ids from mmap handle
 peekMaxIDs :: MMapHandle MaxIDs -> IO MaxIDs
 peekMaxIDs mh = peekMM mh 0
 
+-- | Highest assigned object id
 lastObjectID :: MMapHandle MaxIDs -> IO ObjectID
 lastObjectID = (miObject <$>) . peekMaxIDs
  
+-- | Generate next object id
 nextObjectID :: MMapHandle MaxIDs -> IO ObjectID
 nextObjectID mh = do
   mids <- peekMaxIDs mh
@@ -380,9 +387,11 @@ nextObjectID mh = do
   pokeMM mh mids{miObject = oid} 0
   return oid
 
+-- | Highest assigned relation id
 lastRelationID :: MMapHandle MaxIDs -> IO RelationID
 lastRelationID = (miRelation <$>) . peekMaxIDs
 
+-- | Generate next relation id
 nextRelationID :: MMapHandle MaxIDs -> IO RelationID
 nextRelationID mh = do
   mids <- peekMaxIDs mh
@@ -390,10 +399,11 @@ nextRelationID mh = do
   pokeMM mh mids{miRelation = oid} 0
   return oid
 
-
+-- | Highest assigned property id
 lastPropertyID :: MMapHandle MaxIDs -> IO PropertyID
 lastPropertyID = (miProperty <$>) . peekMaxIDs
 
+-- | Generate next property id
 nextPropertyID :: MMapHandle MaxIDs -> IO PropertyID
 nextPropertyID mh = do
   mids <- peekMaxIDs mh
@@ -401,9 +411,11 @@ nextPropertyID mh = do
   pokeMM mh mids{miProperty = oid} 0
   return oid
   
+-- | Highest assigned property type id
 lastPropertyTypeID :: MMapHandle MaxIDs -> IO PropertyTypeID
 lastPropertyTypeID = (miPropertyType <$>) . peekMaxIDs
 
+-- | Generate next property type id
 nextPropertyTypeID :: MMapHandle MaxIDs -> IO PropertyTypeID
 nextPropertyTypeID mh = do
   mids <- peekMaxIDs mh
@@ -411,9 +423,11 @@ nextPropertyTypeID mh = do
   pokeMM mh mids{miPropertyType = oid} 0
   return oid
 
+-- | Highest assigned object type id
 lastObjectTypeID :: MMapHandle MaxIDs -> IO ObjectTypeID
 lastObjectTypeID = (miObjectType <$>) . peekMaxIDs
 
+-- | Generate next object type id
 nextObjectTypeID :: MMapHandle MaxIDs -> IO ObjectTypeID
 nextObjectTypeID mh = do
   mids <- peekMaxIDs mh
@@ -421,9 +435,11 @@ nextObjectTypeID mh = do
   pokeMM mh mids{miObjectType = oid} 0
   return oid
 
+-- | Highest assigned relation type id
 lastRelationTypeID :: MMapHandle MaxIDs -> IO RelationTypeID
 lastRelationTypeID = (miRelationType <$>) . peekMaxIDs
 
+-- | Generate next relation type id
 nextRelationTypeID :: MMapHandle MaxIDs -> IO RelationTypeID
 nextRelationTypeID mh = do
   mids <- peekMaxIDs mh
@@ -431,6 +447,7 @@ nextRelationTypeID mh = do
   pokeMM mh mids{miRelationType = oid} 0
   return oid
 
+-- | Generate next property value offset id
 nextPropertyValueOffset :: MMapHandle MaxIDs -> PropertyValueOffset -> IO PropertyValueOffset
 nextPropertyValueOffset mh inc = do
   mids <- peekMM mh 0

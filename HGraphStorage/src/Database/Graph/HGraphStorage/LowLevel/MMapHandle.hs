@@ -1,4 +1,14 @@
-module Database.Graph.HGraphStorage.LowLevel.MMapHandle where
+-- | Wrap the usage of mmap
+module Database.Graph.HGraphStorage.LowLevel.MMapHandle 
+  ( MMapHandle
+  , openMmap
+  , closeMmap
+  , peekMM
+  , pokeMM
+  , peekMMBS
+  , pokeMMBS
+  )
+  where
 
 import System.IO.MMap
 import Foreign.Storable
@@ -10,32 +20,40 @@ import Data.Word
 import Control.Monad
 import Control.Applicative
 
+-- | A Handle to a Mmapped file
 data MMapHandle a = MMapHandle
-  { mhName     :: FilePath
-  , mhHandle   :: !(MVar (MMapHandle_ a))
+  { mhName     :: FilePath -- ^ The file being mmapped
+  , mhHandle   :: !(MVar (MMapHandle_ a)) -- ^ The underlying pointer information
   }
  
-data MMapHandle_ a = MMapHandle_
-  { mhOrigOff  :: (Int64,Int)
-  , mhPtr      :: Ptr a
-  , mhRaw      :: Int
-  , mhOff      :: Int
-  , mhLen      :: Int
+-- | The underlying pointer information
+data MMapHandle_ a = MMapHandle_ 
+  { mhOrigOff  :: (Int64,Int) -- ^ original offset and length
+  , mhPtr      :: Ptr a -- ^ Pointer
+  , mhRaw      :: Int -- ^ Raw length
+  , mhOff      :: Int -- ^ Offset
   }
   
-  
-openMmap :: (Storable a) => FilePath -> (Int64,Int) -> a -> IO (MMapHandle a)
+-- | Open a MMapHandle on a file
+openMmap 
+  :: (Storable a) 
+  => FilePath -- ^ File name
+  -> (Int64,Int) -- ^ Offset/length
+  -> a  -- ^ needed for alignment, not used
+  -> IO (MMapHandle a)
 openMmap fp offlen u1 = do
   h_ <- openMmap_ fp offlen u1
   mv <- newMVar h_
   return $ MMapHandle fp mv
   
+-- | Open an internal MMapHandle on a file
 openMmap_ :: (Storable a) => FilePath -> (Int64,Int) -> a -> IO (MMapHandle_ a)
 openMmap_ fp offlen u1 = do
-  (ptr,raw,off,len) <- mmapFilePtr fp ReadWriteEx $ Just offlen
+  (ptr,raw,off,_) <- mmapFilePtr fp ReadWriteEx $ Just offlen
   let al = alignment u1
-  return $ MMapHandle_ offlen (alignPtr (plusPtr ptr off) al) raw off len
+  return $ MMapHandle_ offlen (alignPtr (plusPtr ptr off) al) raw off
   
+-- | Write a value into the handle at the given offset
 pokeMM :: (Storable a) => MMapHandle a -> a -> Int -> IO ()
 pokeMM mm a sz = modifyMVar_ (mhHandle mm) p
   where 
@@ -48,6 +66,7 @@ pokeMM mm a sz = modifyMVar_ (mhHandle mm) p
           poke (plusPtr (mhPtr h2_) sz) a
           return h2_
 
+-- | Write a bytetring into the handle at the given offset
 pokeMMBS :: MMapHandle Word8 -> BS.ByteString -> Int -> IO ()
 pokeMMBS mm a sz 
   | BS.null a = return ()
@@ -68,14 +87,15 @@ pokeMMBS mm a sz
           h2_ <- extendMM h_ (mhName mm) full
           fp (mhPtr h2_)
           return h2_
-   
+ 
+-- | Extend the pointer range to include the given index  
 extendMM :: (Storable a) => MMapHandle_ a -> FilePath -> Int -> IO (MMapHandle_ a)
 extendMM h_ fp sz = do
     closeMM_ h_
     let (off,_)=mhOrigOff h_
     openMmap_ fp (off,sz*2) undefined
   
-       
+-- | Read the value at the given offset       
 peekMM :: (Storable a) => MMapHandle a -> Int -> IO a
 peekMM mm sz = modifyMVar (mhHandle mm) p
   where 
@@ -87,7 +107,8 @@ peekMM mm sz = modifyMVar (mhHandle mm) p
         h2_ <- extendMM h_ (mhName mm) sz
         a<-peek (plusPtr (mhPtr h2_) sz)
         return (h2_,a)
-  
+
+-- | Read a byte string at the given offset  
 peekMMBS :: MMapHandle Word8 -> Int -> Int -> IO BS.ByteString
 peekMMBS mm sz len = modifyMVar (mhHandle mm) p
   where 
@@ -106,13 +127,15 @@ peekMMBS mm sz len = modifyMVar (mhHandle mm) p
         a<-fp (mhPtr h2_)
         return (h2_,BS.pack a) 
   
- 
-closeMM :: MMapHandle a -> IO ()
-closeMM mm = withMVar (mhHandle mm) closeMM_
+-- | Close the MMapHandle 
+closeMmap :: MMapHandle a -> IO ()
+closeMmap mm = withMVar (mhHandle mm) closeMM_
 
+-- | Close the internal handle
 closeMM_ :: MMapHandle_ a -> IO ()
 closeMM_ mm = munmapFilePtr (mhPtr mm) (mhRaw mm)
   
+-- | is the index in bound?
 inBounds :: MMapHandle_ a -> Int -> Bool
 inBounds mm sz = sz + mhOff mm < mhRaw mm
   
