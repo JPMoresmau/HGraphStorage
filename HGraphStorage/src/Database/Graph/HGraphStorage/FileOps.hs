@@ -2,7 +2,6 @@
 -- | Operations on the data files
 module Database.Graph.HGraphStorage.FileOps where
 
-import Control.Applicative
 import Control.Exception.Base (Exception)
 
 import Data.Binary
@@ -35,7 +34,7 @@ open dir gs = do
   createDirectoryIfMissing True dir
   if gsUseMMap gs
     then
-      MMHandles 
+      MMHandles
         <$> getMMHandle objectFile
         <*> getFreeList objectFile (def::ObjectID)
         <*> getMMHandle objectTypeFile
@@ -48,7 +47,7 @@ open dir gs = do
         <*> getMMHandle propertyValuesFile
         <*> getMMHandle maxIDsFile
     else
-      Handles 
+      Handles
         <$> getHandle objectFile
         <*> getFreeList objectFile (def::ObjectID)
         <*> getHandle objectTypeFile
@@ -64,7 +63,7 @@ open dir gs = do
     getHandle name = do
       let f = dir </> name
       h <- openBinaryFile f ReadWriteMode
-      setBufferMode h $ gsMainBuffering gs 
+      setBufferMode h $ gsMainBuffering gs
       return h
     getMMHandle :: (Default a,Storable a) => FilePath -> IO (MMapHandle a)
     getMMHandle name = openMmap (dir </> name) (0,4096) def
@@ -72,13 +71,13 @@ open dir gs = do
     getFreeList name d = do
       let f = dir </> freePrefix ++ name
       h<- openBinaryFile f ReadWriteMode
-      setBufferMode h $ gsFreeBuffering gs 
+      setBufferMode h $ gsFreeBuffering gs
       initFreeList (fromIntegral $ binLength d) h (do
           ex <- doesFileExist f
           when ex $ removeFile f)
-          
 
--- | Set the buffer mode on the given handle, if provided.          
+
+-- | Set the buffer mode on the given handle, if provided.
 setBufferMode :: Handle -> Maybe BufferMode -> IO()
 setBufferMode _ Nothing = return ()
 setBufferMode h (Just bm) = hSetBuffering h bm
@@ -124,7 +123,7 @@ readModel hs = do
     writeName hs t
   ots <- readAll hs
   rts <- readAll hs
-  mdlWithProps <- foldM addProp defMdl pts 
+  mdlWithProps <- foldM addProp defMdl pts
   mdlWithObjs <- foldM addOType mdlWithProps ots
   foldM addRType mdlWithObjs rts
   where
@@ -137,7 +136,7 @@ readModel hs = do
 
     addOType mdl (otId,ot) = addN mdl (otFirstProperty ot) otId $ \name ->
         return mdl {mObjectTypes = addToLookup otId name $ mObjectTypes mdl}
-        
+
     addRType mdl (rtId,rt) = addN mdl (rtFirstProperty rt) rtId $ \name ->
         return mdl {mRelationTypes = addToLookup rtId name $ mRelationTypes mdl}
 
@@ -147,16 +146,16 @@ readModel hs = do
         [(_,PVText name)] -> f name
         [] -> throwIO $ NoNameProperty tId
         _ -> throwIO $ MultipleNameProperty tId
-        
+
 -- | Generic write operation: write the given binary using the given ID and record size
 -- if no id, we write at then end
 -- otherwise we always ensure that we write at the proper offset, which is why we have fixed length records
 writeGeneric :: (GraphUsableMonad m)
   => (Integral a,Binary a,Default a, Binary b) => Handle -> Maybe (FreeList a) -> Int64 -> Maybe a -> b -> m a
-writeGeneric h _ sz (Just a) b = 
-  liftIO $ do 
+writeGeneric h _ sz (Just a) b =
+  liftIO $ do
     hSeek h AbsoluteSeek (toInteger (a - 1) * toInteger sz)
-    BS.hPut h $ encode b 
+    BS.hPut h $ encode b
     return a
 writeGeneric h mf sz Nothing b = do
   mid <- liftIO $ join <$> for mf getFromFreeList
@@ -165,8 +164,8 @@ writeGeneric h mf sz Nothing b = do
     Nothing -> liftIO $ do
       hSeek h SeekFromEnd 0
       allsz <- hTell h
-      let a=div allsz $ toInteger sz 
-      BS.hPut h $ encode b 
+      let a=div allsz $ toInteger sz
+      BS.hPut h $ encode b
       return $ fromInteger a + 1
 
 -- | Generic write operation: write the given binary using the given ID and record size on the given mmap handle
@@ -175,8 +174,8 @@ writeGeneric h mf sz Nothing b = do
 writeGenericMM :: (GraphUsableMonad m)
   => (Integral a, Binary a, Default a, Storable b) => MMapHandle b -> Maybe (FreeList a) -> MMapHandle MaxIDs -> (MMapHandle MaxIDs -> IO a)
   -> Maybe a -> b -> m a
-writeGenericMM h _ _ _  (Just a) b = 
-  liftIO $ do 
+writeGenericMM h _ _ _  (Just a) b =
+  liftIO $ do
     pokeMM h b (fromIntegral (a - 1) * sizeOf b)
     return a
 writeGenericMM h mf mhids f Nothing b = do
@@ -206,9 +205,9 @@ readAll :: (GraphUsableMonad m,GraphIdSerializable a b) => Handles -> m [(a,b)]
 readAll hs = foldAll hs (\a b->return $ b:a) []
 
 -- | Read all binary objects from a given handle, generating their IDs from their offset
-foldAllGeneric 
-  :: (GraphUsableMonad m,Integral a, Eq b, Binary b, Default b) 
-  => Handle -> Int64 
+foldAllGeneric
+  :: (GraphUsableMonad m,Integral a, Eq b, Binary b, Default b)
+  => Handle -> Int64
   -> (c -> (a,b) -> m c) -> c -> m c
 foldAllGeneric h sz f st = do
   liftIO $ hSeek h AbsoluteSeek 0
@@ -226,8 +225,8 @@ foldAllGeneric h sz f st = do
                 go isz i l2
 
 -- | Read all binary objects from a given mmap handle, generating their IDs from their offset
-foldAllGenericMM 
-  :: (GraphUsableMonad m,Integral a, Eq b, Storable b, Default b) 
+foldAllGenericMM
+  :: (GraphUsableMonad m,Integral a, Eq b, Storable b, Default b)
   => MMapHandle b -> b
   -> (c -> (a,b) -> m c) -> c -> a -> m c
 foldAllGenericMM h d f st maxID =
@@ -248,16 +247,16 @@ readProperties :: (GraphUsableMonad m)
 readProperties _ _ _ pid | pid == def  = return []
 readProperties hs mdl ptid pid = do
   p <- readOne hs pid
-  vs <- if ptid == def || pType p == ptid 
+  vs <- if ptid == def || pType p == ptid
           then
-            do 
+            do
                let m = DM.lookup (pType p) $ toName $ mPropertyTypes mdl
-               (_, dt) <- throwIfNothing (UnknownPropertyType (pType p)) m 
+               (_, dt) <- throwIfNothing (UnknownPropertyType (pType p)) m
                val <- readPropertyValue hs dt (pOffset p) (pLength p)
                return [(p,val)]
           else return []
   let p2 = pNext p
-  (vs ++) <$> readProperties hs mdl ptid p2 
+  (vs ++) <$> readProperties hs mdl ptid p2
 
 
 -- | Write a property, knowing the next one in the chain
@@ -269,14 +268,14 @@ writeProperty hs@Handles{..} ptid nextid v = do
   off <- liftIO $ fromIntegral <$> hTell h
   let bs = toBin v
   liftIO $ BS.hPut h bs
-  write hs Nothing $ Property ptid nextid off (BS.length bs) 
+  write hs Nothing $ Property ptid nextid off (BS.length bs)
 writeProperty hs@MMHandles{..} ptid nextid v = do
   let bs = toBin v
   off <- liftIO $ do
-    off<-nextPropertyValueOffset mhMaxIDs (BS.length bs) 
+    off<-nextPropertyValueOffset mhMaxIDs (BS.length bs)
     pokeMMBS mhPropertyValues bs (fromIntegral off)
     return off
-  write hs Nothing $ Property ptid nextid off (BS.length bs) 
+  write hs Nothing $ Property ptid nextid off (BS.length bs)
 
 -- | Convert a property value to a bytestring
 toBin :: PropertyValue -> BS.ByteString
@@ -332,7 +331,7 @@ instance GraphIdSerializable RelationID Relation where
   readOne MMHandles{..}  = readGenericMM mhRelations def
   foldAll Handles{..} = foldAllGeneric hRelations relationSize
   foldAll MMHandles{..} = ((((liftIO $ lastRelationID mhMaxIDs) >>=) .) .) (foldAllGenericMM mhRelations def)
-  
+
 -- | Serialization methods for PropertyID + Property
 instance GraphIdSerializable PropertyID Property where
   write Handles{..} = writeGeneric hProperties (Just hPropertyFree)  propertySize
@@ -341,9 +340,9 @@ instance GraphIdSerializable PropertyID Property where
   readOne MMHandles{..}  = readGenericMM mhProperties def
   foldAll Handles{..} = foldAllGeneric hProperties propertySize
   foldAll MMHandles{..} = ((((liftIO $ lastPropertyID mhMaxIDs) >>=) .) .) (foldAllGenericMM mhProperties def)
- 
- 
--- | Serialization methods for PropertyTypeID + PropertyType  
+
+
+-- | Serialization methods for PropertyTypeID + PropertyType
 instance GraphIdSerializable PropertyTypeID PropertyType where
   write Handles{..} = writeGeneric hPropertyTypes Nothing propertyTypeSize
   write MMHandles{..} = writeGenericMM mhPropertyTypes Nothing mhMaxIDs nextPropertyTypeID
@@ -351,9 +350,9 @@ instance GraphIdSerializable PropertyTypeID PropertyType where
   readOne MMHandles{..}  = readGenericMM mhPropertyTypes def
   foldAll Handles{..} = foldAllGeneric hPropertyTypes propertyTypeSize
   foldAll MMHandles{..} = ((((liftIO $ lastPropertyTypeID mhMaxIDs) >>=) .) .) (foldAllGenericMM mhPropertyTypes def)
- 
- 
--- | Serialization methods for ObjectTypeID + ObjectType  
+
+
+-- | Serialization methods for ObjectTypeID + ObjectType
 instance GraphIdSerializable ObjectTypeID ObjectType where
   write Handles{..} = writeGeneric hObjectTypes Nothing objectTypeSize
   write MMHandles{..} = writeGenericMM mhObjectTypes Nothing mhMaxIDs nextObjectTypeID
@@ -361,8 +360,8 @@ instance GraphIdSerializable ObjectTypeID ObjectType where
   readOne MMHandles{..}  = readGenericMM mhObjectTypes def
   foldAll Handles{..} = foldAllGeneric hObjectTypes objectTypeSize
   foldAll MMHandles{..} = ((((liftIO $ lastObjectTypeID mhMaxIDs) >>=) .) .) (foldAllGenericMM mhObjectTypes def)
- 
--- | Serialization methods for RelationTypeID + RelationType  
+
+-- | Serialization methods for RelationTypeID + RelationType
 instance GraphIdSerializable RelationTypeID RelationType where
   write Handles{..} = writeGeneric hRelationTypes Nothing relationTypeSize
   write MMHandles{..} = writeGenericMM mhRelationTypes Nothing mhMaxIDs nextRelationTypeID
@@ -370,7 +369,7 @@ instance GraphIdSerializable RelationTypeID RelationType where
   readOne MMHandles{..}  = readGenericMM mhRelationTypes def
   foldAll Handles{..} = foldAllGeneric hRelationTypes relationTypeSize
   foldAll MMHandles{..} = ((((liftIO $ lastRelationTypeID mhMaxIDs) >>=) .) .) (foldAllGenericMM mhRelationTypes def)
- 
+
 -- | Read max ids from mmap handle
 peekMaxIDs :: MMapHandle MaxIDs -> IO MaxIDs
 peekMaxIDs mh = peekMM mh 0
@@ -378,7 +377,7 @@ peekMaxIDs mh = peekMM mh 0
 -- | Highest assigned object id
 lastObjectID :: MMapHandle MaxIDs -> IO ObjectID
 lastObjectID = (miObject <$>) . peekMaxIDs
- 
+
 -- | Generate next object id
 nextObjectID :: MMapHandle MaxIDs -> IO ObjectID
 nextObjectID mh = do
@@ -410,7 +409,7 @@ nextPropertyID mh = do
   let oid=miProperty mids + 1
   pokeMM mh mids{miProperty = oid} 0
   return oid
-  
+
 -- | Highest assigned property type id
 lastPropertyTypeID :: MMapHandle MaxIDs -> IO PropertyTypeID
 lastPropertyTypeID = (miPropertyType <$>) . peekMaxIDs
@@ -454,4 +453,3 @@ nextPropertyValueOffset mh inc = do
   let oid=miPropertyOffset mids
   pokeMM mh mids{miPropertyOffset = oid + inc} 0
   return oid
-

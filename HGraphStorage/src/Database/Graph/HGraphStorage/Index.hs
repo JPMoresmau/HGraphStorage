@@ -2,7 +2,7 @@
 -- | Index on disk
 -- <http://sqlity.net/en/2445/b-plus-tree>
 -- <http://en.wikipedia.org/wiki/Trie>
-module Database.Graph.HGraphStorage.Index 
+module Database.Graph.HGraphStorage.Index
   ( Trie (..)
   , newTrie
   , newFileTrie
@@ -13,7 +13,6 @@ module Database.Graph.HGraphStorage.Index
   , delete)
 where
 
-import Control.Applicative
 import Data.Binary
 import Data.Int (Int64)
 import System.IO
@@ -28,7 +27,7 @@ import System.Directory
 
 
 -- | Trie on disk
-data Trie k v = Trie 
+data Trie k v = Trie
   { trHandle     :: Handle -- ^ The disk Handle
   , trRecordLength :: Int64 -- ^ The length of a record
   }
@@ -52,7 +51,7 @@ newFileTrie file = do
   let dir = takeDirectory file
   createDirectoryIfMissing True dir
   h<- openBinaryFile file ReadWriteMode
-  return $ newTrie h 
+  return $ newTrie h
 
 
 -- | Create a new trie with a given handle
@@ -60,7 +59,7 @@ newFileTrie file = do
 -- Key and Value must have a binary representation of constant length!
 newTrie :: forall k v. (Binary k,Binary v,Default k,Default v) => Handle -> Trie k v
 newTrie h = Trie h (keyL+valL+pointL*2)
-  where 
+  where
     keyL   = binLength (def::k)
     valL   = binLength (def::v)
     pointL = binLength (def::Int64)
@@ -92,13 +91,13 @@ insert key val tr = insertValue key val tr $ \h (off,node) -> do
 
 
 -- | Insert a value performing a given action if the key is already present
-insertValue :: (Binary k,Eq k,Default k,Binary v,Eq v,Default v) 
-  => [k] -> v -> Trie k v 
+insertValue :: (Binary k,Eq k,Default k,Binary v,Eq v,Default v)
+  => [k] -> v -> Trie k v
   -> (Handle -> (Int64,TrieNode k v) ->IO (Maybe v))
   -> IO (Maybe v)
 insertValue key val tr onExisting =
-  readRecord tr 0 >>= insert' key 
-  where 
+  readRecord tr 0 >>= insert' key
+  where
     h = trHandle tr
     insert' [] _ = return Nothing
     insert' (k:ks) Nothing = do
@@ -143,12 +142,12 @@ readRecord :: (Binary k,Binary v) => Trie k v -> Int64 -> IO (Maybe (Int64,TrieN
 readRecord tr off = do
     hSeek h AbsoluteSeek $ fromIntegral off
     bs <- BS.hGet h isz
-    if BS.null bs 
+    if BS.null bs
       then return Nothing
       else return $ Just (off, decode bs)
-  where 
+  where
     h = trHandle tr
-    isz = fromIntegral $ trRecordLength tr  
+    isz = fromIntegral $ trRecordLength tr
 
 
 -- | Read a given record whose offset must be greater than 0
@@ -162,32 +161,32 @@ lookup :: (Binary k,Eq k,Binary v,Eq v,Default v) => [k] -> Trie k v -> IO (Mayb
 lookup key tr = do
   mnode <- lookupNode key tr
   return $ case mnode of
-    Just (_,node) -> 
+    Just (_,node) ->
       let v=tnValue node
       in if v /= def
         then Just v
         else Nothing
     _ -> Nothing
-    
+
 
 -- | Lookup a node from a Key
 lookupNode :: (Binary k,Eq k,Binary v,Eq v,Default v) => [k] -> Trie k v -> IO (Maybe (Int64, TrieNode k v))
-lookupNode key tr = readRecord tr 0 >>= lookup' key 
-  where 
+lookupNode key tr = readRecord tr 0 >>= lookup' key
+  where
     lookup' [] r = return r
     lookup' _ Nothing = return Nothing
-    lookup' (k:ks) (Just (off,node)) = 
+    lookup' (k:ks) (Just (off,node)) =
       if k == tnKey node
-        then 
+        then
           if null ks
             then return $ Just (off,node)
             else readChildRecord tr (tnChild node) >>= lookup' ks
-        else 
+        else
           readChildRecord tr (tnNext node) >>= lookup' (k : ks)
 
 
 -- | Return all key and values for the given prefix which may be null (in which case all mappings are returned).
-prefix :: (Binary k,Eq k,Binary v,Eq v,Default v) => [k] -> Trie k v -> IO [([k],v)]          
+prefix :: (Binary k,Eq k,Binary v,Eq v,Default v) => [k] -> Trie k v -> IO [([k],v)]
 prefix key tr = lookupNode key tr >>= collect (null key) key
   where
     collect _ _ Nothing = return []
@@ -196,7 +195,7 @@ prefix key tr = lookupNode key tr >>= collect (null key) key
       let v = tnValue node
       let nk = if withNexts then k++[k'] else k
       let me = if v == def then [] else [(nk,v)]
-      subs <- readChildRecord tr (tnChild node) >>= collect True nk 
+      subs <- readChildRecord tr (tnChild node) >>= collect True nk
       nexts <- if withNexts then readChildRecord tr (tnNext node) >>= collect True k else return []
       return $ me ++ subs ++ nexts
 
@@ -214,8 +213,8 @@ delete key tr = do
           hSeek h AbsoluteSeek $ fromIntegral off
           let (node'::TrieNode k v) = node{tnValue=def}
           BS.hPut h $ encode node'
-          return $ Just oldV 
+          return $ Just oldV
         else return Nothing
     _ -> return Nothing
-  where 
+  where
     h = trHandle tr

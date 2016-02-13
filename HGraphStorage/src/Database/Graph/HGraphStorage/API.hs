@@ -1,4 +1,5 @@
-{-# LANGUAGE DeriveDataTypeable, StandaloneDeriving, ConstraintKinds, FlexibleInstances, MultiParamTypeClasses, TypeFamilies, UndecidableInstances, DeriveFunctor, GeneralizedNewtypeDeriving, RankNTypes, FlexibleContexts, RecordWildCards #-}
+{-# LANGUAGE ScopedTypeVariables,DeriveDataTypeable, StandaloneDeriving, ConstraintKinds, FlexibleInstances, MultiParamTypeClasses, TypeFamilies, UndecidableInstances, DeriveFunctor, GeneralizedNewtypeDeriving, RankNTypes, FlexibleContexts, RecordWildCards #-}
+
 -- | Higher level API for reading and writing
 module Database.Graph.HGraphStorage.API where
 
@@ -64,12 +65,12 @@ withGraphStorage dir gs act = R.runResourceT $ do
   res <- evalStateT (unIs loadIndexes) (GsData hs model dir gs [])
   R.release rk
   return res
-  where 
+  where
     loadIndexes = do
       idxf <- indexFile
       ex <- liftIO $ doesFileExist idxf
       when ex $ do
-        indexInfos <- liftM read $ liftIO $ readFile idxf
+        indexInfos::[IndexInfo] <- liftM read $ liftIO $ readFile idxf
         mapM_ (addIndex' False) indexInfos
       act
 
@@ -121,7 +122,7 @@ data GraphRelation a b = GraphRelation
   , grType       :: T.Text
   , grProperties :: DM.Map T.Text [PropertyValue]
   } deriving (Show,Read,Eq,Ord,Typeable)
-  
+
 
 
 -- | Get the file handles.
@@ -177,7 +178,7 @@ updateObject obj = do
   _ <- write hs (Just $ goID obj) (Object tid def def propId)
   insertNewValuesInIndex (goID obj) toAdd
   return obj
- 
+
 -- | Checks if there is a duplicate on any applicable index. Then remove obsolete values from the index, and generate the list of values to add
 -- We'll only add the values once the object has been properly written, so we can have the ID of new objects.
 removeOldValuesFromIndex :: (GraphUsableMonad m) => GraphObject a -> Maybe ObjectID -> GraphStorageT m [(T.Text,[Trie Int16 ObjectID],[PropertyValue])]
@@ -210,24 +211,24 @@ removeOldValuesFromIndex g mid = do
           | otherwise  -> ((tries,ovs):toRem,(n,tries,nvs):toAdd)
     removeVals (tries,vs) = mapM_ (removeVal tries) vs
     removeVal tries v = mapM_ (delete (valueToIndex v)) tries
-    
-    
+
+
 -- | Check if duplicates exist in index.
 checkDuplicates :: (GraphUsableMonad m) => Maybe ObjectID -> [(T.Text,[Trie Int16 ObjectID],[PropertyValue])] -> GraphStorageT m ()
 checkDuplicates mid toAdd = do
-  dups <- liftIO 
+  dups <- liftIO
               $   filter (not . null . snd)
                 . map (second (filter (\ oid -> Just oid /= mid)))
               <$> mapM checkDups toAdd
   unless (null dups) $
-        liftIO $ throwIO $ DuplicateIndexKey $ map fst dups            
+        liftIO $ throwIO $ DuplicateIndexKey $ map fst dups
   where
     checkDups (n,tries,vs) = do
       ids<-concat <$> mapM (checkDup tries) vs
       return (n,ids)
     checkDup tries v = catMaybes <$> mapM (Idx.lookup (valueToIndex v)) tries
 
-      
+
 -- | Insert new values in applicable indices.
 insertNewValuesInIndex :: (GraphUsableMonad m) => ObjectID -> [(T.Text,[Trie Int16 ObjectID],[PropertyValue])] -> GraphStorageT m ()
 insertNewValuesInIndex gid = liftIO . mapM_ addVals
@@ -236,15 +237,15 @@ insertNewValuesInIndex gid = liftIO . mapM_ addVals
     -- We should not have duplicates here, given removeOldValuesFromIndex
     addVal tries v = mapM_ (insert (valueToIndex v) gid) tries
 
- 
+
 -- | Create properties from map, returns the first ID in the chain
-createProperties 
+createProperties
   :: (GraphUsableMonad m)
   => DM.Map T.Text [PropertyValue]
   -> GraphStorageT m PropertyID
 createProperties = foldM addProps def . DM.toList
   where
-    addProps nid (_,[]) = return nid 
+    addProps nid (_,[]) = return nid
     addProps nid (name,vs@(v:_)) = do
       let dt = valueType v
       ptid <- propertyType (name,dt)
@@ -256,7 +257,7 @@ createProperties = foldM addProps def . DM.toList
 filterObjects :: (GraphUsableMonad m) =>
                 (GraphObject ObjectID -> GraphStorageT m Bool) -> GraphStorageT m [GraphObject ObjectID]
 filterObjects ft = filterM ft =<< (mapM (uncurry populateObject) =<< readAll =<< getHandles)
-  
+
 -- | (Internal) Fill an object with its properties
 populateObject :: (GraphUsableMonad m) =>
                     ObjectID -> Object -> GraphStorageT m (GraphObject ObjectID)
@@ -297,8 +298,8 @@ listProperties pid = do
       mdl <- getModel
       let ptid = pType p
       (pName,_) <- throwIfNothing (UnknownPropertyType ptid) $ DM.lookup ptid $ toName $ mPropertyTypes mdl
-      return (pName,vs)   
-  
+      return (pName,vs)
+
 
 -- | Create a relation between two objects
 createRelation :: (GraphUsableMonad m) =>
@@ -310,8 +311,8 @@ createRelation rel = do
   where
     getObjectId obj = case goID obj of
       Just i -> return obj{goID=i}
-      Nothing -> createObject obj 
-      
+      Nothing -> createObject obj
+
 -- | Create a relation between two objects
 createRelation' :: (GraphUsableMonad m) =>
   GraphRelation (Maybe RelationID) ObjectID -> GraphStorageT m (GraphRelation RelationID ObjectID)
@@ -330,7 +331,7 @@ createRelation' rel = do
   nid <- write hs (grID rel) (Relation fromId fromTid toId toTid rid (oFirstFrom fromTObj) (oFirstTo toTObj) propId)
   _ <- write hs (Just fromId) fromTObj{oFirstFrom=nid}
   _ <- write hs (Just toId) toTObj{oFirstTo=nid}
-  
+
   return rel{grID=nid,grFrom=fromObj,grTo=toObj}
 
 
@@ -338,7 +339,7 @@ createRelation' rel = do
 filterRelations :: (GraphUsableMonad m) =>
                 (GraphRelation RelationID ObjectID -> GraphStorageT m Bool) -> GraphStorageT m [GraphRelation RelationID ObjectID]
 filterRelations ft = filterM ft =<< (mapM popProperties =<< readAll =<< getHandles)
-  where 
+  where
     popProperties (relId,rel) = do
       mdl <- getModel
       let pid = rFirstProperty rel
@@ -351,8 +352,8 @@ filterRelations ft = filterM ft =<< (mapM popProperties =<< readAll =<< getHandl
 
 
 -- | Delete a relation from the DB.
-deleteRelation 
-  :: (GraphUsableMonad m) 
+deleteRelation
+  :: (GraphUsableMonad m)
   => RelationID
   -> GraphStorageT m ()
 deleteRelation rid =
@@ -360,9 +361,9 @@ deleteRelation rid =
 
 -- | (Internal) Delete a relation from the DB.
 deleteRelation'
-  :: (GraphUsableMonad m) 
+  :: (GraphUsableMonad m)
   => RelationID
-  -> Bool -- ^ Should we clean the origin object relation list? 
+  -> Bool -- ^ Should we clean the origin object relation list?
   -> Bool -- ^ Should we clean the target object relation list?
   -> GraphStorageT m [RelationID] -- ^ The next ids in the chain we didn't clean
 deleteRelation' rid cleanFrom cleanTo = do
@@ -371,9 +372,9 @@ deleteRelation' rid cleanFrom cleanTo = do
   _ <- write hs (Just rid) (def::Relation)
   addToFreeList rid (hRelationFree hs)
   deleteProperties hs $ rFirstProperty rel
-  
+
   let nextFrom = rFromNext rel
-  ns1 <- if cleanFrom 
+  ns1 <- if cleanFrom
     then do
       let fromId = rFrom rel
       fromO <- readOne hs fromId
@@ -383,9 +384,9 @@ deleteRelation' rid cleanFrom cleanTo = do
         else fixChain hs fstFromId rFromNext (\r -> r{rFromNext = nextFrom})
       return []
     else return [nextFrom]
-  
+
   let nextTo = rToNext rel
-  ns2 <- if cleanTo 
+  ns2 <- if cleanTo
     then do
       let toId = rTo rel
       toO <- readOne hs toId
@@ -394,20 +395,20 @@ deleteRelation' rid cleanFrom cleanTo = do
         then void $ write hs (Just toId) toO{oFirstTo = nextTo}
         else fixChain hs fstToId rToNext (\r -> r{rToNext = nextTo})
       return []
-    else return [nextTo] 
+    else return [nextTo]
   return $ filter (def /=) $ ns1 ++ ns2
   where
-    fixChain _ crid _ _ | crid == def = return () 
+    fixChain _ crid _ _ | crid == def = return ()
     fixChain hs crid getNext setNext = do
       rel <- readOne hs crid
       let nid = getNext rel
       if nid == rid
-        then void $ write hs (Just crid) $ setNext rel  
+        then void $ write hs (Just crid) $ setNext rel
         else fixChain hs nid getNext setNext
 
 -- | Delete an object
-deleteObject 
-  :: (GraphUsableMonad m) 
+deleteObject
+  :: (GraphUsableMonad m)
   => ObjectID
   -> GraphStorageT m ()
 deleteObject oid = do
@@ -420,16 +421,16 @@ deleteObject oid = do
   cleanRef False True $ oFirstFrom obj
   cleanRef True False $ oFirstTo obj
   deleteProperties hs $ oFirstProperty obj
-  
+
   where
     cleanRef _ _ rid | rid == def = return ()
     cleanRef cleanFrom cleanTo rid = do
       rids <- deleteRelation' rid cleanFrom cleanTo
       mapM_ (cleanRef  cleanFrom cleanTo) rids
-  
+
 -- | (Internal) Delete all properties in the list
 deleteProperties
-  :: (GraphUsableMonad m) 
+  :: (GraphUsableMonad m)
   => Handles
   -> PropertyID
   -> GraphStorageT m ()
@@ -443,7 +444,7 @@ deleteProperties hs pid = do
   deleteProperties hs next
 
 -- | (Internal) retrieve an object type id from its name (creating it if need be)
-objectType :: (GraphUsableMonad m) 
+objectType :: (GraphUsableMonad m)
   => T.Text -> GraphStorageT m ObjectTypeID
 objectType typeName  = fetchType mObjectTypes
   (\mdl ots -> mdl {mObjectTypes = ots})
@@ -451,7 +452,7 @@ objectType typeName  = fetchType mObjectTypes
   ObjectType
 
 -- | (Internal) retrieve a property type id from its name and data type (creating it if need be)
-propertyType :: (GraphUsableMonad m) 
+propertyType :: (GraphUsableMonad m)
   => (T.Text,DataType) -> GraphStorageT m PropertyTypeID
 propertyType t@(propName,dt) = fetchType mPropertyTypes
   (\mdl pts -> mdl {mPropertyTypes = pts})
@@ -459,7 +460,7 @@ propertyType t@(propName,dt) = fetchType mPropertyTypes
   (PropertyType $ dataTypeID dt)
 
 -- | (Internal) retrieve an relation type id from its name (creating it if need be)
-relationType :: (GraphUsableMonad m) 
+relationType :: (GraphUsableMonad m)
   => T.Text -> GraphStorageT m RelationTypeID
 relationType relationName = fetchType mRelationTypes
   (\mdl rts -> mdl {mRelationTypes = rts})
@@ -472,7 +473,7 @@ fetchType :: (GraphUsableMonad m, Ord k, GraphIdSerializable i v)
   -> (Model -> Lookup i k -> Model)
   -> k
   -> T.Text
-  -> (PropertyID -> v) 
+  -> (PropertyID -> v)
   -> GraphStorageT m i
 fetchType getM setM k name build = do
   mdl <- getModel
@@ -486,7 +487,7 @@ fetchType getM setM k name build = do
       let pts = addToLookup newid k $ getM mdl
           mdl2 = setM mdl pts
       Gs $ modify (\s -> s{gsModel=mdl2})
-      return newid  
+      return newid
 
 
 -- | Add an index to be automatically managed.
@@ -513,7 +514,7 @@ addIndex' indexExisting ii@(IndexInfo idxName _ props) = do
         checkDuplicates (Just gid) toAdd
         insertNewValuesInIndex gid toAdd
         return ()
-        
+
 
 -- | (Internal) Create an index.
 createIndex :: forall k v m. (Binary k,Binary v,Default k,Default v,GraphUsableMonad m) =>
@@ -536,10 +537,10 @@ indexMap obj = do
     addPropIndex (ii,tr) dm
       | isIndexApplicable ii (goType obj) = foldr (\prop -> DM.insertWith (++) prop [tr]) dm $ iiProps ii
       | otherwise = dm
- 
+
 
 -- | Is the given index applicable to the given object type?
 isIndexApplicable :: IndexInfo -> T.Text -> Bool
 isIndexApplicable ii typ = let
   tps = iiTypes ii
-  in null tps || typ `elem` tps 
+  in null tps || typ `elem` tps

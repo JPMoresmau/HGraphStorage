@@ -2,7 +2,6 @@
 -- | Higher level API for querying
 module Database.Graph.HGraphStorage.Query where
 
-import Control.Applicative
 import Data.Default
 import Data.Typeable
 import qualified Data.Text as T
@@ -15,7 +14,7 @@ import Database.Graph.HGraphStorage.Types
 -- | Direction to follow
 data RelationDir = OUT | IN | BOTH
   deriving (Show,Read,Eq,Ord,Bounded,Enum,Typeable)
-  
+
 -- | One step in the query
 data RelationStep = RelationStep
   { rsRelTypes  :: [T.Text] -- ^ Types of relations to follow (empty -> all)
@@ -40,8 +39,8 @@ data StepResult = StepResult
 
 
 -- | Run a one step query on one given object
-queryStep 
-  :: (GraphUsableMonad m) 
+queryStep
+  :: (GraphUsableMonad m)
   => ObjectID -> RelationStep -> GraphStorageT m [StepResult]
 queryStep oid rs = do
   hs <- getHandles
@@ -49,19 +48,19 @@ queryStep oid rs = do
   restrictedRelTypes <- mapM relationType $ rsRelTypes rs
   restrictedObjTypes <- mapM objectType $ rsTgtTypes rs
   let filt1 = filterRels hs restrictedRelTypes restrictedObjTypes (rsTgtFilter rs)
-  froms <- 
+  froms <-
     if rsDirection rs `elem` [OUT,BOTH]
       then filt1 (oFirstFrom o) rFromNext rToType rTo OUT ([],0)
       else return ([],0)
   if rsDirection rs `elem` [IN,BOTH]
-      then fst <$> filt1 (oFirstTo o) rToNext rFromType rFrom IN froms 
+      then fst <$> filt1 (oFirstTo o) rToNext rFromType rFrom IN froms
       else return $ fst froms
   where
     isRestricted [] _ =True
     isRestricted ls l = l `elem` ls
-    filterRels hs resRels resObjs filt fid tonext tgtType tgtId dir (accum,cnt) 
+    filterRels hs resRels resObjs filt fid tonext tgtType tgtId dir (accum,cnt)
       | fid == def = return (accum,cnt)
-      | Just a <- rsLimit rs , 
+      | Just a <- rsLimit rs ,
         cnt==a = return (accum,cnt)
       | otherwise  = do
         rel <- readOne hs fid
@@ -70,7 +69,7 @@ queryStep oid rs = do
           then do
             let oid2 = tgtId rel
             obj <- getObject oid2
-            if filt obj 
+            if filt obj
               then do
                 mdl <- getModel
                 let pid = rFirstProperty rel

@@ -1,11 +1,11 @@
 {-# LANGUAGE ConstraintKinds    #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveGeneric      #-}
+{-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE OverloadedStrings  #-}
 -- | Base types and simple functions on them
 module Database.Graph.HGraphStorage.Types where
 
-import           Control.Applicative
 import           Control.Exception.Base
 import           Data.Binary
 import           Data.Bits
@@ -77,7 +77,7 @@ instance Default Object where
 -- | Storable dictionary
 storeObject :: Store.Dictionary Object
 storeObject = Store.run $
-  Object 
+  Object
      <$> Store.element oType
      <*> Store.element oFirstFrom
      <*> Store.element oFirstTo
@@ -120,7 +120,7 @@ instance Default Relation where
 -- | Storable dictionary
 storeRelation :: Store.Dictionary Relation
 storeRelation = Store.run $
-  Relation 
+  Relation
      <$> Store.element rFrom
      <*> Store.element rFromType
      <*> Store.element rTo
@@ -159,7 +159,7 @@ instance Default Property where
 -- | Storable dictionary
 storeProperty :: Store.Dictionary Property
 storeProperty = Store.run $
-  Property 
+  Property
      <$> Store.element pType
      <*> Store.element pNext
      <*> Store.element pOffset
@@ -192,7 +192,7 @@ instance Default PropertyType where
 -- | Storable dictionary
 storePropertyType :: Store.Dictionary PropertyType
 storePropertyType = Store.run $
-  PropertyType 
+  PropertyType
      <$> Store.element ptDataType
      <*> Store.element ptFirstProperty
 
@@ -222,7 +222,7 @@ instance Default ObjectType where
 -- | Storable dictionary
 storeObjectType :: Store.Dictionary ObjectType
 storeObjectType = Store.run $
-  ObjectType 
+  ObjectType
      <$> Store.element otFirstProperty
 
 -- | Storable instance
@@ -251,7 +251,7 @@ instance Default RelationType where
 -- | Storable dictionary
 storeRelationType :: Store.Dictionary RelationType
 storeRelationType = Store.run $
-  RelationType 
+  RelationType
      <$> Store.element rtFirstProperty
 
 -- | Storable instance
@@ -293,7 +293,7 @@ data Handles = Handles
   } -- ^ MMap Handles
 
 -- | Maximum ids used for objects
-data MaxIDs = MaxIDs 
+data MaxIDs = MaxIDs
   { miObject :: ObjectID
   , miObjectType :: ObjectTypeID
   , miRelation :: RelationID
@@ -314,7 +314,7 @@ instance Default MaxIDs where
 -- | Storable dictionary
 storeMaxIDs :: Store.Dictionary MaxIDs
 storeMaxIDs = Store.run $
-  MaxIDs 
+  MaxIDs
      <$> Store.element miObject
      <*> Store.element miObjectType
      <*> Store.element miRelation
@@ -329,8 +329,8 @@ instance Storable MaxIDs where
     alignment = Store.alignment storeMaxIDs
     peek = Store.peek storeMaxIDs
     poke = Store.poke storeMaxIDs
- 
-  
+
+
 -- | The current model: lookup tables between names and ids types of artifacts
 data Model = Model
   { mObjectTypes   :: Lookup ObjectTypeID T.Text
@@ -437,4 +437,3 @@ data GraphSettings = GraphSettings
 -- | Default instance for settings
 instance Default GraphSettings where
   def = GraphSettings Nothing Nothing Nothing True
-
