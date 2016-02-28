@@ -1,0 +1,82 @@
+name:                TGraph
+version:             0.0.0.1
+synopsis:            Initial project template from stack
+description:         Please see README.md
+homepage:            http://github.com/githubuser/TGraph#readme
+license:             BSD3
+license-file:        LICENSE
+author:              JP Moresmau <jp@moresmau.fr>
+maintainer:          JP Moresmau <jp@moresmau.fr>
+copyright:           2016 JP Moresmau
+category:            Database
+build-type:          Simple
+-- extra-source-files:
+cabal-version:       >=1.10
+
+library
+  hs-source-dirs:      src
+  exposed-modules:     Database.Graph.TGraph
+  other-modules:       Database.Graph.TGraph.Types
+                       Database.Graph.TGraph.Data
+                       Database.Graph.TGraph.Model
+                       Database.Graph.TGraph.API
+                       Database.Graph.TGraph.LowLevel.MMapHandle
+                       Database.Graph.TGraph.LowLevel.FreeList
+                       Database.Graph.TGraph.Constants
+  build-depends:       base >= 4.7 && < 5
+                       , stm
+                       , TCache
+                       , binary >= 0.8
+                       , bytestring
+                       , text
+                       , containers
+                       , data-default
+                       , mmap
+                       , storable-record
+                       , transformers
+                       , directory
+                       , filepath
+  default-language:    Haskell2010
+
+executable TGraph-exe
+  hs-source-dirs:      app
+  main-is:             Main.hs
+  ghc-options:         -threaded -rtsopts -with-rtsopts=-N
+  build-depends:       base
+                     , TGraph
+                     , TCache
+                     , stm
+                     , text
+                     , threads
+                     , mmap
+                     , storable-record
+  default-language:    Haskell2010
+
+test-suite TGraph-test
+  type:                exitcode-stdio-1.0
+  hs-source-dirs:      test
+  main-is:             Spec.hs
+  build-depends:       base
+                     , TCache
+                     , TGraph
+                     , hspec
+                     , directory
+                     , threads
+                     , stm
+                     , binary >= 0.8
+                     , containers
+                     , text
+                     , bytestring
+                     , data-default
+                     , mmap
+                     , storable-record
+                     , transformers
+                     , directory
+                     , filepath
+  ghc-options:         -threaded -rtsopts -with-rtsopts=-N
+  default-language:    Haskell2010
+  other-modules:       Database.Graph.TGraph.ModelSpec
+
+source-repository head
+  type:     git
+  location: https://github.com/githubuser/TGraph
