@@ -62,7 +62,8 @@ testDir = ".tcachedata"
 timesDo = replicateM_
 milliSleep = threadDelay . (*) 1000
 
+defaultRepeat = 25
 
 forks doStuff nb = do
-  tids <- forM [1..nb] $ \n-> Th.forkIO $ 25 `timesDo` doStuff n
+  tids <- forM [1..nb] $ \n-> Th.forkIO $ defaultRepeat `timesDo` doStuff n
   forM_ tids snd

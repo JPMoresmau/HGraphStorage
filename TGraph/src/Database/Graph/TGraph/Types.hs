@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveGeneric, FlexibleContexts, MultiParamTypeClasses, RecordWildCards, FunctionalDependencies, TypeSynonymInstances    #-}
+{-# LANGUAGE DeriveGeneric, FlexibleContexts,FlexibleInstances, MultiParamTypeClasses, RecordWildCards, FunctionalDependencies, ScopedTypeVariables,TypeSynonymInstances    #-}
 module Database.Graph.TGraph.Types
 
 where
@@ -30,13 +30,29 @@ import System.IO.Unsafe
 import Debug.Trace
 
 -- | IDs for objects
-type ObjectID       = Int32
+type ObjectID       = Int64
+--  deriving (Show,Read,Eq,Ord,Typeable,Generic,Default,Binary,Num,Storable)
+
+-- instance Default ObjectID where
+--   def = ObjectID 0
+--
+-- instance Binary ObjectID where
+--   put (ObjectID i) = put i
+--   get = ObjectID <$> get
 
 -- | IDs for types of objects
 type ObjectTypeID   = Int16
 
 -- | IDs for relations
-type RelationID     = Int32
+type RelationID     = Int64
+  --deriving (Show,Read,Eq,Ord,Typeable,Generic,Default,Binary,Num,Storable)
+
+-- instance Default RelationID where
+--   def = RelationID 0
+--
+-- instance Binary RelationID where
+--   put (RelationID i) = put i
+--   get = RelationID <$> get
 
 -- | IDs for types of relations
 type RelationTypeID = Int16
@@ -57,17 +73,17 @@ type PropertyValueOffset = Int64
 type PropertyValueLength = Int64
 
 
-class (Num typ,Eq typ,Show typ) => HasID dat typ | dat -> typ, typ -> dat where
+class (Default typ,Eq typ,Show typ) => HasID dat typ | dat -> typ, typ -> dat where
   toNumID :: DBRef dat -> typ
   toStringID :: typ -> String
 
 maybeID :: (HasID dat typ) => Maybe (DBRef dat) -> typ
-maybeID Nothing = 0
+maybeID Nothing = def
 maybeID (Just db)= toNumID db
 
 maybeRef :: (HasID dat typ,IResource dat,Typeable dat) => typ -> Maybe (DBRef dat)
 maybeRef nb
-  | nb == 0 = Nothing
+  | nb == def = Nothing
   | otherwise = Just $ getDBRef $ toStringID nb
 
 -- | Calculates the length of the binary serialization of the given object
@@ -203,8 +219,7 @@ instance Default Model where
 data MaxIDs = MaxIDs
   { miObject :: ObjectID
   , miRelation :: RelationID
-  , miProperty :: PropertyID
-  , miValueOffset :: PropertyValueOffset
+  , miPropertyOffset :: PropertyValueOffset
   } deriving (Show,Read,Eq,Ord,Typeable,Generic)
 
 instance Serializable MaxIDs where
@@ -215,7 +230,7 @@ instance Indexable MaxIDs where
    key = const maxName
 
 instance Default MaxIDs where
-  def = MaxIDs def def def def
+  def = MaxIDs def def def
 
 data MetaData = MetaData
   { mdModel :: DBRef Model
@@ -225,109 +240,285 @@ data MetaData = MetaData
 metaData :: MetaData
 metaData = MetaData (getDBRef modelName) (getDBRef maxName)
 
--- data APIModel = APIModel
---   { amModel :: DBRef Model
---   , amObjectTypes   :: Lookup ObjectTypeID T.Text
---   , amRelationTypes :: Lookup RelationTypeID T.Text
---   , amPropertyTypes :: Lookup PropertyTypeID (T.Text,DataType)
---   } deriving (Show,Read,Eq,Ord,Typeable)
+-- | An object as represented in the object file
+data ObjectRecord = ObjectRecord
+  {
+    orType          :: ObjectTypeID -- ^ type of object
+  , orFirstFrom     :: RelationID   -- ^ first relation starting from the object
+  , orFirstTo       :: RelationID   -- ^ first relation arriving at the object
+  , orFirstPropertyOffset :: PropertyValueOffset
+  , orFirstPropertyLength :: PropertyValueLength -- ^ first property
+  } deriving (Show,Read,Eq,Ord,Typeable,Generic)
+
+-- | Simple binary instance
+instance Binary ObjectRecord
+
+-- | Simple default instance
+instance Default ObjectRecord where
+  def = ObjectRecord 0 0 0 0 0
+
+-- | Storable dictionary
+storeObject :: Store.Dictionary ObjectRecord
+storeObject = Store.run $
+  ObjectRecord
+     <$> Store.element orType
+     <*> Store.element orFirstFrom
+     <*> Store.element orFirstTo
+     <*> Store.element orFirstPropertyOffset
+     <*> Store.element orFirstPropertyLength
+
+-- | Storable instance
+instance Storable ObjectRecord where
+    sizeOf = Store.sizeOf storeObject
+    alignment = Store.alignment storeObject
+    peek = Store.peek storeObject
+    poke = Store.poke storeObject
+
+-- | Size of an object record
+objectSize :: Int64
+objectSize = binLength (def::ObjectRecord)
+
+instance HasID Object (ObjectID,ObjectTypeID) where
+  toNumID db = read $ drop 1 (keyObjDBRef db)
+  toStringID i = "o" <> show i
+
+data Object = Object
+  { oID            :: ObjectID
+  , oType          :: ObjectTypeID -- ^ type of object
+  , oFirstFrom     :: Maybe (DBRef Relation)   -- ^ first relation starting from the object
+  , oFirstTo       :: Maybe (DBRef Relation)   -- ^ first relation arriving at the object
+  , oFirstProperty :: Maybe (DBRef Property) -- ^ first property
+ }
+
+instance IResource Object where
+ keyResource o = toStringID (oID o, oType o)
+ writeResource Object{..} = do
+   hs <- readIORef handleRef
+   let (off,len) = maybeID oFirstProperty
+       obr = ObjectRecord oType (maybeID oFirstFrom) (maybeID oFirstTo) off len
+       h = mhObjects hs
+   pokeMM h obr (fromIntegral (oID - 1) * sizeOf obr)
+ readResourceByKey k = do
+   hs <- readIORef handleRef
+   let (oid,_)::(ObjectID,ObjectTypeID) = read $ drop 1 k
+       h = mhObjects hs
+   obr <- peekMM h (fromIntegral oid)
+   if orType obr == def
+     then return Nothing
+     else return $ Just $ Object oid (orType obr)
+                                (maybeRef $ orFirstFrom obr)
+                                (maybeRef $ orFirstTo obr)
+                                (maybeRef (orFirstPropertyOffset obr,orFirstPropertyLength obr))
+
+-- | A relation as represented in the relation file
+data RelationRecord = RelationRecord
+ { rrFrom          :: ObjectID  -- ^ origin object
+ , rrFromType      :: ObjectTypeID -- ^ origin object type
+ , rrTo            :: ObjectID -- ^ target object
+ , rrToType        :: ObjectTypeID -- ^ target object type
+ , rrType          :: RelationTypeID -- ^ type of the relation
+ , rrFromNext      :: RelationID -- ^ next relation of origin object
+ , rrToNext        :: RelationID -- ^ next relation of target object
+ , rrFirstPropertyOffset :: PropertyValueOffset -- ^ first property id
+ , rrFirstPropertyLength :: PropertyValueLength -- ^ first property id
+ } deriving (Show,Read,Eq,Ord,Typeable,Generic)
+
+-- | simple binary instance
+instance Binary RelationRecord
+
+-- | simple default instance
+instance Default RelationRecord where
+ def  = RelationRecord 0 0 0 0 0 0 0 0 0
+
+-- | Storable dictionary
+storeRelation :: Store.Dictionary RelationRecord
+storeRelation = Store.run $
+ RelationRecord
+    <$> Store.element rrFrom
+    <*> Store.element rrFromType
+    <*> Store.element rrTo
+    <*> Store.element rrToType
+    <*> Store.element rrType
+    <*> Store.element rrFromNext
+    <*> Store.element rrToNext
+    <*> Store.element rrFirstPropertyOffset
+    <*> Store.element rrFirstPropertyLength
+
+-- | Storable instance
+instance Storable RelationRecord where
+   sizeOf = Store.sizeOf storeRelation
+   alignment = Store.alignment storeRelation
+   peek = Store.peek storeRelation
+   poke = Store.poke storeRelation
+
+-- | size of a relation record
+relationSize :: Int64
+relationSize =  binLength (def::RelationRecord)
+
+instance HasID Relation RelationID where
+  toNumID db = read $ drop 1 (keyObjDBRef db)
+  toStringID i = "r" <> show i
+
+data Relation = Relation
+  { rID            :: RelationID
+  , rFrom          :: DBRef Object  -- ^ origin object
+  , rTo            :: DBRef Object -- ^ target object
+  , rType          :: RelationTypeID -- ^ type of the relation
+  , rFromNext      :: Maybe (DBRef Relation) -- ^ next relation of origin object
+  , rToNext        :: Maybe (DBRef Relation) -- ^ next relation of target object
+  , rFirstProperty :: Maybe (DBRef Property) -- ^ first property id
+  } deriving (Show,Read,Eq,Ord,Typeable,Generic)
+
+instance IResource Relation where
+  keyResource = toStringID . rID
+  writeResource Relation{..} = do
+    hs <- readIORef handleRef
+    let (fid,ftype) = toNumID rFrom
+        (tid,ttype) = toNumID rTo
+        (off,len) = maybeID rFirstProperty
+        rr = RelationRecord fid ftype tid ttype rType (maybeID rFromNext) (maybeID rToNext) off len
+        h = mhRelations hs
+    pokeMM h rr (fromIntegral (rID - 1) * sizeOf rr)
+  readResourceByKey k = do
+    hs <- readIORef handleRef
+    let rid = read $ drop 1 k
+        h = mhRelations hs
+    rr <- peekMM h (fromIntegral rid)
+    if rrFrom rr == def
+      then return Nothing
+      else return $ Just $ Relation rid (getDBRef $ toStringID (rrFrom rr,rrFromType rr))
+                                 (getDBRef $ toStringID (rrTo rr,rrToType rr))
+                                 (rrType rr)
+                                 (maybeRef $ rrFromNext rr)
+                                 (maybeRef $ rrToNext rr)
+                                 (maybeRef (rrFirstPropertyOffset rr,rrFirstPropertyLength rr))
 
 -- | A property as represented in the property file
 data Property = Property
-  { pID     :: PropertyID
+  { pID     :: (PropertyValueOffset,PropertyValueLength)
   , pType   :: PropertyTypeID -- ^ type of the property
   , pNext   :: Maybe (DBRef Property) -- ^ next property
   , pValue  :: PropertyValue -- ^ property value
-  , pOffset :: PropertyValueOffset -- ^ offset of the value
-  , pLength :: PropertyValueLength -- ^ length of the value
   } deriving (Show,Read,Eq,Ord,Typeable,Generic)
 
--- instance Indexable Property where
---  key p = toStringID (pID p)
+instance HasID Property (PropertyValueOffset,PropertyValueLength) where
+  toNumID db = read $ map f $ drop 1 (keyObjDBRef db)
+    where
+      f 'a'=','
+      f 'b'='('
+      f 'c'=')'
+      f a = a
+  toStringID i = "p" <> map f (show i)
+    where
+      f ','='a'
+      f '('='b'
+      f ')'='c'
+      f a = a
 
-data PropertyRecord = PropertyRecord
-  { prType :: PropertyTypeID
-  , prDataType :: DataTypeID
-  , prNext :: PropertyID
-  , prOffset :: PropertyValueOffset -- ^ offset of the value
-  , prLength :: PropertyValueLength -- ^ length of the value
-  } deriving (Show,Read,Eq,Ord,Typeable,Generic)
+instance Indexable Property where
+  key = toStringID . pID
 
--- | Storable dictionary
-storeProperty :: Store.Dictionary PropertyRecord
-storeProperty = Store.run $
-  PropertyRecord
-     <$> Store.element prType
-     <*> Store.element prDataType
-     <*> Store.element prNext
-     <*> Store.element prOffset
-     <*> Store.element prLength
+-- instance Default PropertyRecord where
+--   def = PropertyRecord def def def def def
 
--- | Storable instance
-instance Storable PropertyRecord where
-    sizeOf = Store.sizeOf storeProperty
-    alignment = Store.alignment storeProperty
-    peek = Store.peek storeProperty
-    poke = Store.poke storeProperty
+-- instance IResource Property where
+--   keyResource = toStringID . pID
+--   writeResource Property{..} = do
+--     hs <- readIORef handleRef
+--     let pr = PropertyRecord pType (dataTypeID $ valueType pValue) (maybeID pNext) pOffset pLength
+--         h = mhProperties hs
+--         bs = toBin pValue
+--     pokeMMBS (mhPropertyValues hs) bs (fromIntegral pOffset)
+--     pokeMM h pr (fromIntegral (pID - 1) * sizeOf pr)
+--   readResourceByKey k = do
+--     hs <- readIORef handleRef
+--     let pid = read $ drop 1 k
+--         h = mhProperties hs
+--     pr <- peekMM h ((fromIntegral pid - 1) * sizeOf (def::PropertyRecord))
+--     if pr == def
+--       then return Nothing
+--       else do
+--         let dt = dataTypeFromID $ prDataType pr
+--         let r = maybeRef $ prNext pr
+--         v <- toValue dt <$> peekMMBS (mhPropertyValues hs) (fromIntegral (prOffset pr)) (fromIntegral (prLength pr))
+--         return $ Just $ Property pid (prType pr) r v (prOffset pr) (prLength pr)
 
-instance HasID Property PropertyID where
-  toNumID db = read $ drop 1 (keyObjDBRef db)
-  toStringID i = "p" <> show i
+-- instance IResource Property where
+--   keyResource = toStringID . pID
+--   writeResource Property{..} = do
+--     hs <- readIORef handleRef
+--     let b1 = runPut $ do
+--                putInt16be pType
+--                put (dataTypeID $ valueType pValue)
+--                put (maybeID pNext)
+--                put $ toBin pValue
+--         h = mhProperties hs
+--     print $ "writing property " ++ show pID
+--     pokeMMBS h b1 (fromIntegral $ fst pID)
+--     print $ "wrote property " ++ show pID
+--     -- pokeMM h pr (fromIntegral (pID - 1) * sizeOf pr)
+--   readResourceByKey k = do
+--     hs <- readIORef handleRef
+--     let pid = read $ drop 1 k
+--         h = mhProperties hs
+--     b <- peekMMBS h (fromIntegral $ fst pid) (fromIntegral $ snd pid)
+--     return $ case runGetOrFail (decodeP pid) b of
+--       Left _ -> Nothing
+--       Right (_,_,m) -> m
+--     where
+--       decodeP pid = do
+--         t <- get
+--         if t == def
+--           then return Nothing
+--           else do
+--             dt <- dataTypeFromID <$> get
+--             next <- maybeRef <$> get
+--             bs <- get
+--             return $ Just $ Property pid t next (toValue dt bs)
 
-instance Default PropertyRecord where
-  def = PropertyRecord def def def def def
 
-instance IResource Property where
-  keyResource = toStringID . pID
-  writeResource Property{..} = do
-    hs <- readIORef handleRef
-    let pr = PropertyRecord pType (dataTypeID $ valueType pValue) (maybeID pNext) pOffset pLength
-        h = mhProperties hs
-        bs = toBin pValue
-    pokeMMBS (mhPropertyValues hs) bs (fromIntegral pOffset)
-    pokeMM h pr (fromIntegral (pID - 1) * sizeOf pr)
-  readResourceByKey k = do
-    hs <- readIORef handleRef
-    let pid = read $ drop 1 k
-        h = mhProperties hs
-    pr <- peekMM h ((fromIntegral pid - 1) * sizeOf (def::PropertyRecord))
-    if pr == def
-      then return Nothing
-      else do
-        let dt = dataTypeFromID $ prDataType pr
-        let r = maybeRef $ prNext pr
-        v <- toValue dt <$> peekMMBS (mhPropertyValues hs) (fromIntegral (prOffset pr)) (fromIntegral (prLength pr))
-        return $ Just $ Property pid (prType pr) r v (prOffset pr) (prLength pr)
+    -- pr <- peekMM h ((fromIntegral pid - 1) * sizeOf (def::PropertyRecord))
+    -- if pr == def
+    --   then return Nothing
+    --   else do
+    --     let dt = dataTypeFromID $ prDataType pr
+    --     let r = maybeRef $ prNext pr
+    --     v <- toValue dt <$> peekMMBS (mhPropertyValues hs) (fromIntegral (prOffset pr)) (fromIntegral (prLength pr))
+    --     return $ Just $ Property pid (prType pr) r v (prOffset pr) (prLength pr)
 
--- instance Serializable Property where
---   serialize Property{..} = runPut $ do
---     putInt32be pID
---     putInt16be pType
---     putInt32be (maybeID pNext)
---     putInt64be pOffset
---     putInt64be pLength
---   deserialize = runGet $ Property
---       <$> get
---       <*> get
---       <*> (maybeRef <$> get)
---       <*> get
---       <*> get
+instance Serializable Property where
+  serialize Property{..} = runPut $ do
+                  putInt16be pType
+                  put (dataTypeID $ valueType pValue)
+                  put (maybeID pNext)
+                  put $ toBin pValue
+  deserialKey k = runGet $ decodeP (read $ map f $ drop 1 k)
+    where
+        decodeP pid = do
+          t <- get
+          dt <- dataTypeFromID <$> get
+          next <- maybeRef <$> get
+          bs <- get
+          return $ Property pid t next (toValue dt bs)
+        f 'a'=','
+        f 'b'='('
+        f 'c'=')'
+        f a = a
 
 -- | Handles to the various files
 data Handles = MMHandles
   {
-  -- mhObjects        :: MMapHandle Object
-  -- , hObjectFree      :: FreeList ObjectID
-  --, mhRelations      :: MMapHandle Relation
-  --, hRelationFree    :: FreeList RelationID
-    mhProperties     :: MMapHandle PropertyRecord
+    mhObjects        :: MMapHandle ObjectRecord
+  , hObjectFree      :: FreeList ObjectID
+  , mhRelations      :: MMapHandle RelationRecord
+  , hRelationFree    :: FreeList RelationID
+  , mhProperties     :: MMapHandle Word8
   , hPropertyFree    :: FreeList PropertyID
-  , mhPropertyValues :: MMapHandle Word8
   } -- ^ MMap Handles
 
 handleRef :: IORef Handles
 {-# NOINLINE handleRef #-}
-handleRef = unsafePerformIO (newIORef (MMHandles undefined undefined undefined))
+handleRef = unsafePerformIO (newIORef (MMHandles undefined undefined undefined undefined undefined undefined))
 
 setHandles :: Handles -> IO()
 setHandles = writeIORef handleRef

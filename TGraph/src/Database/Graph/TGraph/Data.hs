@@ -8,8 +8,9 @@ import Database.Graph.TGraph.Types
 import Database.Graph.TGraph.LowLevel.MMapHandle
 import Database.Graph.TGraph.LowLevel.FreeList
 import Data.TCache
-import Data.Binary
 import Control.Monad
+import           Data.Binary
+import           Data.Binary.Put
 import qualified Data.ByteString.Lazy                   as BS
 import           Data.Typeable
 import           GHC.Generics                           (Generic)
@@ -27,13 +28,13 @@ open :: FilePath -> IO Handles
 open dir = do
   createDirectoryIfMissing True dir
   MMHandles
-    <$> -- getMMHandle objectFile
-    -- <*> getFreeList objectFile (def::ObjectID)
-    -- <*> getMMHandle relationFile
-    -- <*> getFreeList relationFile (def::RelationID)
-        getMMHandle propertyFile
+    <$> getMMHandle objectFile
+    <*> getFreeList objectFile (def::ObjectID)
+    <*> getMMHandle relationFile
+    <*> getFreeList relationFile (def::RelationID)
+    <*> getMMHandle propertyFile
     <*> getFreeList propertyFile (def::PropertyID)
-    <*> getMMHandle propertyValuesFile
+  --  <*> getMMHandle propertyValuesFile
   --  <*> getMMHandle maxIDsFile
   where
     getMMHandle :: (Default a,Storable a) => FilePath -> IO (MMapHandle a)
@@ -56,21 +57,42 @@ setBufferMode h (Just bm) = hSetBuffering h bm
 close :: Handles -> IO ()
 close MMHandles{..} = do
   syncCache
---  closeMmap mhObjects
---  _  <- closeFreeList hObjectFree
---  closeMmap mhRelations
---  _ <- closeFreeList hRelationFree
+  closeMmap mhObjects
+  _  <- closeFreeList hObjectFree
+  closeMmap mhRelations
+  _ <- closeFreeList hRelationFree
   closeMmap mhProperties
   _ <- closeFreeList hPropertyFree
-  closeMmap mhPropertyValues
+  return ()
+--  closeMmap mhPropertyValues
 
--- | Write a property, knowing the next one in the chain
-writeProperty :: PropertyTypeID -> Maybe (DBRef Property) -> PropertyValue -> MetaData -> STM (DBRef Property)
-writeProperty ptid nextid pValue md = do
+newObject :: ObjectTypeID -> Maybe (DBRef Property) -> MetaData -> STM (DBRef Object)
+newObject otid mprop md = do
   let maxRef = mdMaxIDs md
   maxIds <- getDefRef maxRef
-  let pid = miProperty maxIds + 1
-      offset = miValueOffset maxIds
-      valueLength = BS.length $ toBin pValue
-  writeDBRef maxRef maxIds{miProperty=pid,miValueOffset=offset+valueLength}
-  newDBRef $ Property pid ptid nextid pValue offset valueLength
+  let oid = miObject maxIds + 1
+  writeDBRef maxRef maxIds{miObject = oid}
+  newDBRef $ Object oid otid Nothing Nothing mprop
+
+newRelation :: RelationTypeID -> DBRef Object -> DBRef Object -> Maybe (DBRef Property) -> MetaData -> STM (DBRef Relation)
+newRelation rtid from to mprop md = do
+  let maxRef = mdMaxIDs md
+  maxIds <- getDefRef maxRef
+  let rid = miRelation maxIds + 1
+  writeDBRef maxRef maxIds{miRelation = rid}
+  newDBRef $ Relation rid from to rtid Nothing Nothing mprop
+
+-- | Write a property, knowing the next one in the chain
+newProperty :: PropertyTypeID -> Maybe (DBRef Property) -> PropertyValue -> MetaData -> STM (DBRef Property)
+newProperty ptid nextid pValue md = do
+  let maxRef = mdMaxIDs md
+  maxIds <- getDefRef maxRef
+  let offset = miPropertyOffset maxIds
+      b1 = runPut $ do
+             putInt16be ptid
+             put (dataTypeID $ valueType pValue)
+             put (maybeID nextid)
+             put $ toBin pValue
+      valueLength = BS.length b1
+  writeDBRef maxRef maxIds{miPropertyOffset=offset+valueLength}
+  newDBRef $ Property (offset,valueLength) ptid nextid pValue
