@@ -50,6 +50,10 @@ executable TGraph-exe
                      , threads
                      , mmap
                      , storable-record
+                     , data-default
+                     , bytestring
+                     , directory
+                     , binary
   default-language:    Haskell2010
 
 test-suite TGraph-test

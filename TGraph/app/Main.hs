@@ -1,57 +1,98 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings,DeriveGeneric #-}
 module Main where
 
-import Data.TCache
-import Database.Graph.TGraph
+import           Data.TCache
+import           Data.TCache.DefaultPersistence
 
-import Control.Monad
-import Control.Concurrent
-import Control.Concurrent.STM
+import           Control.Concurrent
+import           Control.Concurrent.STM
 import qualified Control.Concurrent.Thread as Th
-import qualified Data.Text as T
+import           Control.Monad
+import           Data.Binary
+import           Data.Binary.Put
+import qualified Data.ByteString.Lazy                   as BS
+import           Data.ByteString.Lazy.Char8             (pack,unpack)
+import           Data.Monoid
+import           Data.Default
+import           Data.Int
+import           Data.Typeable
+import           GHC.Generics                           (Generic)
+import           System.Directory
+
 
 main :: IO ()
 main = do
+  ex <- doesDirectoryExist ".tcachedata"
+  when ex $ removeDirectoryRecursive ".tcachedata"
 
-  -- name <- atomically $ do
-  --    newDBRef (PropertyType 1 DTText "name")
-  -- ot1 <- atomically $ do
-  --    p1 <- newDBRef (Property 1 name Nothing 0 5)
-  --    newDBRef (ObjectType 1 (Just p1))
-  -- syncCache
-  -- let
-  --   name = getDBRef "pt1" :: DBRef PropertyType
-  --   ot1 = getDBRef "ot1" :: DBRef ObjectType
-  --
-  -- atomically (readDBRef name) >>= print
-  -- atomically (readDBRef ot1) >>= print
-
-  let rmdl = getDBRef modelName
-  -- ot1 <- atomically $ getObjectTypeByName rmdl "type1"
-  -- ot2 <- atomically $ getObjectTypeByName rmdl "type2"
-  -- syncCache
-  -- print ot1
-  -- print ot2
-  -- ot3 <- atomically $ getObjectTypeByName rmdl "type1"
-  -- print ot3
-  tids <- forM [1..10] $ \n-> Th.forkIO $ 25 `timesDo` doStuff rmdl (T.pack ("type" ++ show n))
+  let md = getDBRef "maxIDs"
+  print "start"
+  tids <- forM [1..10] $ \n-> Th.forkIO $ 25 `timesDo` propOp md n
   forM_ tids snd
-  milliSleep 1000
-  ots <- atomically $ do
-     mdl <- getDefRef rmdl
-     return $ mObjectTypes mdl
-
-  print ots
   syncCache
 
 timesDo = replicateM_
 milliSleep = threadDelay . (*) 1000
 
-doStuff rmdl n = do
-  --print n
-  ot <- atomically $ do
-      ot <- getObjectTypeByName rmdl n
-      getObjectTypeByID rmdl (otID ot)
-  --print ot
+-- | A simple IO doing STM
+propOp :: DBRef MaxIDs -> Int -> IO()
+propOp md n = do
+  print $ "in: " ++ show n
+  p <- atomically $ do
+         pr <- newProperty "name" ("value" <> show n) md
+         readDBRef pr
+  print p
   milliSleep 20
   return ()
+
+-- | Reads a DBRef of a default instance, if empty writes the default
+getDefaultRef :: (Default a,Typeable a,IResource a) => DBRef a -> STM a
+getDefaultRef rmdl = do
+  mmdl <- readDBRef rmdl
+  case mmdl of
+    Just mdl -> return mdl
+    Nothing -> do
+      let mdl = def
+      writeDBRef rmdl mdl
+      return mdl
+
+-- | One data kept in DBRef, this is a singleton
+data MaxIDs = MaxIDs
+  { miPropertyOffset :: Int64
+  } deriving (Show,Read,Eq,Ord,Typeable,Generic)
+
+instance Serializable MaxIDs where
+   serialize= pack . show
+   deserialize= read . unpack
+
+instance Indexable MaxIDs where
+   key = const "maxIDs"
+
+instance Default MaxIDs where
+  def = MaxIDs def
+
+-- | Another data kept as DB Ref
+data Property = Property
+  { pID :: Int64
+  , pType :: String
+  , pValue :: String
+  } deriving (Show,Read,Eq,Ord,Typeable,Generic)
+
+instance Serializable Property where
+   serialize= pack . show
+   deserialize= read . unpack
+
+instance Indexable Property where
+   key p = "p" <> show (pID p)
+
+-- | this reads/modifies the MaxIDs DBRef and create a new DBRef Property
+newProperty :: String -> String -> DBRef MaxIDs -> STM (DBRef Property)
+newProperty ptid pValue maxRef = do
+  maxIds <- getDefaultRef maxRef
+  let offset = miPropertyOffset maxIds
+      b1 = runPut $ do
+             put $ pack ptid
+             put $ pack pValue
+      valueLength = BS.length b1
+  writeDBRef maxRef maxIds{miPropertyOffset=offset+valueLength}
+  newDBRef $ Property offset ptid pValue
