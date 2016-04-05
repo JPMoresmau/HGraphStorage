@@ -1,0 +1,73 @@
+name: STMGraph
+version: 0.0.1
+cabal-version: 1.12
+build-type: Simple
+license: AllRightsReserved
+
+library
+    build-depends:
+        base -any,
+        containers -any,
+        stm -any,
+        stm-containers -any,
+        async -any,
+        directory -any,
+        filepath -any,
+        binary -any,
+        storable-record -any,
+        mmap -any,
+        bytestring -any,
+        text -any,
+        data-default -any,
+        transformers -any
+    default-language: Haskell2010
+    hs-source-dirs: src
+    other-modules:
+        Database.Graph.STMGraph.Constants
+        Database.Graph.STMGraph.Raw
+        Database.Graph.STMGraph.Types
+        Database.Graph.STMGraph.LowLevel.MMapHandle
+    ghc-options: -ferror-spans
+
+executable STMGraph
+    main-is: Main.hs
+    build-depends:
+        base -any,
+        stm -any,
+        async -any,
+        directory -any,
+        filepath -any
+    default-language: Haskell2010
+    hs-source-dirs: exe
+    ghc-options: -ferror-spans -threaded -rtsopts -with-rtsopts=-N
+
+test-suite STMGraph-test
+    type: exitcode-stdio-1.0
+    main-is: Spec.hs
+    build-depends:
+        QuickCheck -any,
+        quickcheck-instances -any,
+        base -any,
+        hspec -any,
+        containers -any,
+        stm -any,
+        stm-containers -any,
+        text -any,
+        storable-record -any,
+        mmap -any,
+        bytestring -any,
+        binary -any,
+        data-default -any,
+        transformers -any,
+        filepath -any,
+        directory -any
+    default-language: Haskell2010
+    hs-source-dirs: test src
+    other-modules:
+        Database.Graph.STMGraph.RawSpec
+        Database.Graph.STMGraph.Types
+        Database.Graph.STMGraph.TypesSpec
+        Database.Graph.STMGraph.LowLevel.MMapHandle
+        Database.Graph.STMGraph.LowLevel.MMapHandleSpec
+        Database.Graph.STMGraph.Raw
+    ghc-options: -ferror-spans
