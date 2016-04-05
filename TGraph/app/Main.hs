@@ -6,7 +6,7 @@ import           Data.TCache.DefaultPersistence
 
 import           Control.Concurrent
 import           Control.Concurrent.STM
--- import qualified Control.Concurrent.Thread as Th
+--import qualified Control.Concurrent.Thread as Th
 import           Control.Monad
 import           Data.Binary
 import           Data.Binary.Put
@@ -18,7 +18,7 @@ import           Data.Int
 import           Data.Typeable
 import           GHC.Generics                           (Generic)
 import           System.Directory
-
+import Control.Concurrent.Async
 
 main :: IO ()
 main = do
@@ -27,9 +27,11 @@ main = do
 
   let md = getDBRef "maxIDs"
   print "start"
-  tids <- forM [1..10] $ \n-> forkIO $ 25 `timesDo` propOp md n
+  --tids <- forM [1..10] $ \n-> forkIO $ 25 `timesDo` propOp md n
+  asyncs <- forM [1..10] $ \n-> async $ 25 `timesDo` propOp md n
   --forM_ tids snd
-  getChar
+  --getChar
+  forM_ asyncs wait
   syncCache
 
 timesDo = replicateM_

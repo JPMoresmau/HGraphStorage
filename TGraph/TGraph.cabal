@@ -53,6 +53,7 @@ executable TGraph-exe
                      , data-default
                      , bytestring
                      , directory
+                     , async
                      , binary
   default-language:    Haskell2010
 
