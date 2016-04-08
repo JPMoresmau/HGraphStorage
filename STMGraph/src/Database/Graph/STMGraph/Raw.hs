@@ -85,7 +85,7 @@ load h@Handles{..} mv = do
         exm <- doesFileExist hModel
         mdl <- if exm then stringToModel <$> readFile hModel else def
         db <- atomically $ do
-            db<- emptyDatabase mv
+            db<- newDatabase mv
             writeTVar (mdModel $ dMetadata db) mdl
             return db
         loadObjects h db
@@ -98,9 +98,9 @@ loadObjects Handles{..} Database{..} = foldAllGeneric hObjects objectSize addObj
     where
         addObject (i,o) = atomically $ do
             SM.insert o i (gdObjects dData)
-            writeTVar (mdMaxObjectID dMetadata) i
+            writeTVar (maxID $ mdGenObjectID dMetadata) i
         addObjectID i = atomically $ do
-            SS.insert i (mdFreeObjectIDs dMetadata)
+            freeID i 1 (mdGenObjectID dMetadata)
             return ()
 
 loadRelations :: Handles -> Database -> IO()
@@ -108,25 +108,25 @@ loadRelations Handles{..} Database{..} = void $ foldAllGeneric hRelations relati
     where
         addRelation (i,o) = atomically $ do
             SM.insert o i (gdRelations dData)
-            writeTVar (mdMaxRelationID dMetadata) i
+            writeTVar (maxID $ mdGenRelationID dMetadata) i
         addRelationID i = atomically $ do
-            SS.insert i (mdFreeRelationIDs dMetadata)
+            freeID i 1 (mdGenRelationID dMetadata)
             return ()
 
 loadProperties :: Handles -> Model -> Database -> IO()
 loadProperties h@Handles{..} mdl Database{..} = void $ foldAllGeneric hProperties propertySize addProperty addPropertyID
     where
         addProperty (i,o) = do
-            let mt = DM.lookup (pType o) $ toName $ mPropertyTypes $ mdl
+            let mt = DM.lookup (pType o) $ toName $ mPropertyTypes mdl
             case mt of
-                Nothing -> void $ atomically $ SS.insert i (mdFreePropertyIDs dMetadata)
+                Nothing -> void $ atomically $ freeID i 1 (mdGenPropertyID dMetadata)
                 Just (n,t) -> do
                     v <- readPropertyValue h t (pOffset o) (pLength o)
                     atomically $ do
                         SM.insert (o,v) i (gdProperties dData)
-                        writeTVar (mdMaxPropertyID dMetadata) i
+                        writeTVar (maxID $ mdGenPropertyID dMetadata) i
         addPropertyID i = atomically $ do
-            SS.insert i (mdFreePropertyIDs dMetadata)
+            freeID i 1 (mdGenPropertyID dMetadata)
             return ()
 
 -- | Set the buffer mode on the given handle, if provided.
@@ -153,9 +153,8 @@ foldAllGeneric h sz f1 f2 = do
   go (fromIntegral sz) 0
   where go isz a = do
             bs <- BS.hGet h isz
-            if BS.null bs
-              then return ()
-              else do
+            unless (BS.null bs) $
+              do
                 let b = decode bs
                     i = a + 1
                 if b == def
@@ -167,7 +166,7 @@ writer :: Handles -> TChan WriteEvent -> IO ()
 writer hs@Handles{..} tc = do
     e <- atomically $ readTChan tc
     handle e
-    if e == ClosedDatabase then return() else writer hs tc
+    unless (e == ClosedDatabase) $ writer hs tc
     where
         handle ClosedDatabase = do
             hClose hObjects
@@ -176,7 +175,22 @@ writer hs@Handles{..} tc = do
             hClose hPropertyValues
             return ()
         handle (WrittenModel mdl) = writeFile hModel (modelToString mdl)
-        handle e = error $ "Raw.writer: unhandled event: " ++ show e
+        handle (WrittenObject oid obj) = writeGeneric hObjects objectSize oid obj
+        handle (WrittenRelation rid rel) = writeGeneric hRelations relationSize rid rel
+        handle (WrittenProperty pid pro val) = do
+            writeGeneric hProperties propertySize pid pro
+            hSeek hPropertyValues AbsoluteSeek (toInteger $ pOffset pro)
+            BS.hPut hPropertyValues (toBin val)
+        handle (DeletedObject oid) = writeGeneric hObjects objectSize oid (def::Object)
+        handle (DeletedRelation rid) = writeGeneric hRelations relationSize rid (def::Relation)
+        handle (DeletedProperty pid) = writeGeneric hProperties propertySize pid (def::Property)
+
+
+-- | Generic write operation: write the given binary using the given ID and record size
+writeGeneric :: (Integral a,Binary a,Default a, Binary b) => Handle -> Int64 -> a -> b -> IO ()
+writeGeneric h sz a b =  do
+    hSeek h AbsoluteSeek (toInteger (a - 1) * toInteger sz)
+    BS.hPut h $ encode b
 
 updateModel ::  (Model -> Model) -> Database ->STM ()
 updateModel upd db = do
@@ -188,3 +202,21 @@ updateModel upd db = do
 
 getModel :: Database -> STM Model
 getModel db = readTVar $ mdModel $ dMetadata db
+
+readObject :: Database ->ObjectID -> STM Object
+readObject db oid = do
+    mo <- SM.lookup oid $ gdObjects $ dData db
+    case  mo of
+        Just o -> return o
+        Nothing -> retry
+
+writeObject :: Database -> Maybe ObjectID -> Object -> STM ObjectID
+writeObject db mid o = do
+        i <- getID mid
+        SM.insert o i $ gdObjects $ dData db
+        writeTChan (dWrites db) (WrittenObject i o)
+        return i
+    where
+        getID (Just i)= return i
+        getID _ = nextID (mdGenObjectID $ dMetadata db) 1
+

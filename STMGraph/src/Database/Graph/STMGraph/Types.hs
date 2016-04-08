@@ -39,6 +39,9 @@ import Control.Concurrent.MVar
 import Control.Monad.STM
 import Control.Concurrent.STM.TChan
 import           System.IO
+import qualified ListT
+import Data.Hashable
+import Focus
 
 -- | IDs for objects
 type ObjectID       = Int64
@@ -53,7 +56,7 @@ type RelationID     = Int64
 type RelationTypeID = Int16
 
 -- | IDs for property values
-type PropertyID     = Int32
+type PropertyID     = Int64
 
 -- | IDs for types of properties
 type PropertyTypeID = Int16
@@ -292,35 +295,129 @@ stringToModel s
 instance Default Model where
   def = Model def def def
 
-data FreeLists = FreeLists
-  { flObjectIDs :: [ObjectID]
-  ,  flRelationIDs :: [RelationID]
-  ,  flPropertyIDs :: [PropertyID]
-  } deriving (Show,Read,Eq,Ord,Typeable,Generic)
+--data IDGen = IDGen
+--    { maxID :: TVar Int64
+--    ,  freeIDs :: SM.Map Int64 Int64
+--    }
+--
+--nextID ::  IDGen -> Int64 -> STM Int64
+--nextID IDGen{..} l = do
+--    go $ SM.stream freeIDs
+--    where
+--        go ls = do
+--            ml <- ListT.uncons ls
+--            case ml of
+--                Nothing -> do
+--                    mi<-readTVar maxID
+--                    let ni=mi+l
+--                    writeTVar maxID ni
+--                    return mi
+--                Just ((i,il),_) | l == il -> do
+--                    SM.delete i freeIDs
+--                    return i
+--                Just ((i,il),rs) | l > il -> go rs
+--                Just ((i,il),_) | l < il -> do
+--                    SM.delete i freeIDs
+--                    SM.insert (il-l) (i+l) freeIDs
+--                    return i
+--
+--freeID :: Int64 -> Int64 -> IDGen -> STM ()
+--freeID i l IDGen{..} = do
+--    mi<-readTVar maxID
+--    if i==mi
+--        then do
+--            li<-removeLast (mi-l)
+--            writeTVar maxID li
+--        else do
+--            SM.insert l i freeIDs
+--    where
+--        removeLast i = do
+--            mf <- SM.focus (\m->return (fmap (\l-> i-l) m,Remove)) i freeIDs
+--            case mf of
+--                Just a -> removeLast a
+--                Nothing -> return i
+--
+-- newIDGen :: Int64 -> STM IDGen
+-- newIDGen st= IDGen <$> newTVar st <*> SM.new
+
+
+data IDGen = IDGen
+    { maxID :: TVar Int64
+    ,  freeIDs :: TVar (DM.Map Int64 Int64)
+    }
+
+nextID ::  IDGen -> Int64 -> STM Int64
+nextID IDGen{..} l = do
+    m <- readTVar freeIDs
+    (m2,i) <- go m $ DM.toAscList m
+    writeTVar freeIDs m2
+    return i
+    where
+        go m [] = do
+                        mi<-readTVar maxID
+                        let ni=mi+l
+                        writeTVar maxID ni
+                        return (m,mi)
+        go m ((i,il):_) | l == il = do
+                    let m2=DM.delete i m
+                    return (m2,i)
+        go m ((i,il):rs) | l > il = go m rs
+        go m ((i,il):_) | l < il = do
+                    let m2=DM.delete i m
+                    let m3=DM.insert (il-l) (i+l) m2
+                    return (m3,i)
+
+freeID :: Int64 -> Int64 -> IDGen -> STM ()
+freeID i l IDGen{..} = do
+    mi <- readTVar maxID
+    m <- readTVar freeIDs
+    m2<-if i+l==mi
+                    then do
+                        let (m2,li)=removeLast m i
+                        writeTVar maxID li
+                        return m2
+                    else do
+                        let
+                          mBef = DM.lookupLT i m
+                          mAft = DM.lookupGT i m
+                        return $ clean mi $ defrag mBef mAft i l m
+    writeTVar freeIDs m2
+    where
+        removeLast m i =
+           case DM.lookupLE i m of
+                Just (ix,lx) | (ix+lx)==i -> (DM.delete ix m,ix)
+                _ -> (m,i)
+        defrag (Just (bx,bv)) (Just (ax,av)) i l m | (bx+bv==i) && (i+l==ax) = DM.insert bx (bv+l+av) $ DM.delete ax m
+        defrag (Just (bx,bv)) _ i l m | bx+bv==i  = DM.insert bx (bv+l) m
+        defrag _ (Just (ax,av)) i l m | i+l==ax = DM.insert i (l+av) $ DM.delete ax m
+        defrag _ _ i l m = DM.insert i l m
+        clean i m
+            | DM.null m = m
+            | otherwise =
+                let (k,v) = DM.findMax m
+                in if k>=i
+                    then DM.delete k m
+                    else m
+
+
+newIDGen :: Int64 -> STM IDGen
+newIDGen st= IDGen <$> newTVar st <*> newTVar DM.empty
 
 data MetaData = MetaData
   { mdModel :: TVar Model
-  ,  mdMaxObjectID :: TVar ObjectID
-  ,  mdMaxRelationID :: TVar RelationID
-  ,  mdMaxPropertyID :: TVar PropertyID
-  ,  mdMaxPropertyOffset :: TVar PropertyValueOffset
-  ,  mdFreeObjectIDs :: SS.Set ObjectID
-  ,  mdFreeRelationIDs :: SS.Set RelationID
-  ,  mdFreePropertyIDs :: SS.Set PropertyID
-  ,  mdFreePropertyValues:: SS.Set (PropertyValueOffset,PropertyValueLength)
+  ,  mdGenObjectID :: IDGen
+  ,  mdGenRelationID :: IDGen
+  ,  mdGenPropertyID :: IDGen
+  ,  mdGenPropertyOffset :: IDGen
   }
 
-emptyMetaData :: STM MetaData
-emptyMetaData = MetaData
+newMetaData :: STM MetaData
+newMetaData = MetaData
     <$> newTVar def
-    <*> newTVar def
-    <*> newTVar def
-    <*> newTVar def
-    <*> newTVar def
-    <*> SS.new
-    <*> SS.new
-    <*> SS.new
-    <*> SS.new
+    <*> newIDGen 1
+    <*> newIDGen 1
+    <*> newIDGen 1
+    <*> newIDGen 0
 
 
 data GraphData = GraphData
@@ -329,8 +426,8 @@ data GraphData = GraphData
   , gdProperties :: SM.Map PropertyID (Property,PropertyValue)
  }
 
-emptyGraphData :: STM GraphData
-emptyGraphData = GraphData
+newGraphData :: STM GraphData
+newGraphData = GraphData
     <$> SM.new
     <*> SM.new
     <*> SM.new
@@ -338,12 +435,12 @@ emptyGraphData = GraphData
 
 data WriteEvent =
     WrittenModel Model
-  | WrittenObject Object
-  | WrittenRelation Relation
-  | WrittenProperty (Property,PropertyValue)
-  | DeletedObject Object
-  | DeletedRelation Relation
-  | DeletedProperty Property
+  | WrittenObject ObjectID Object
+  | WrittenRelation RelationID Relation
+  | WrittenProperty PropertyID Property PropertyValue
+  | DeletedObject ObjectID
+  | DeletedRelation RelationID
+  | DeletedProperty PropertyID
   | ClosedDatabase
   deriving (Show,Read,Eq,Ord,Typeable,Generic)
 
@@ -354,10 +451,10 @@ data Database = Database
   ,  dWriterThread :: MVar ()
   }
 
-emptyDatabase :: MVar() -> STM Database
-emptyDatabase mv = Database
-    <$> emptyMetaData
-    <*> emptyGraphData
+newDatabase :: MVar() -> STM Database
+newDatabase mv = Database
+    <$> newMetaData
+    <*> newGraphData
     <*> newTChan
     <*> pure mv
 
