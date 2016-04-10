@@ -18,6 +18,15 @@ module Database.Graph.STMGraph.Raw
     , close
     , getModel
     , updateModel
+    , readObject
+    , writeObject
+    , deleteObject
+    , readRelation
+    , writeRelation
+    , deleteRelation
+    , readProperty
+    , writeProperty
+    , deleteProperty
     ) where
 
 import Database.Graph.STMGraph.Constants
@@ -177,10 +186,10 @@ writer hs@Handles{..} tc = do
         handle (WrittenModel mdl) = writeFile hModel (modelToString mdl)
         handle (WrittenObject oid obj) = writeGeneric hObjects objectSize oid obj
         handle (WrittenRelation rid rel) = writeGeneric hRelations relationSize rid rel
-        handle (WrittenProperty pid pro val) = do
+        handle (WrittenProperty pid (pro,val)) = do
             writeGeneric hProperties propertySize pid pro
             hSeek hPropertyValues AbsoluteSeek (toInteger $ pOffset pro)
-            BS.hPut hPropertyValues (toBin val)
+            BS.hPut hPropertyValues val
         handle (DeletedObject oid) = writeGeneric hObjects objectSize oid (def::Object)
         handle (DeletedRelation rid) = writeGeneric hRelations relationSize rid (def::Relation)
         handle (DeletedProperty pid) = writeGeneric hProperties propertySize pid (def::Property)
@@ -220,3 +229,79 @@ writeObject db mid o = do
         getID (Just i)= return i
         getID _ = nextID (mdGenObjectID $ dMetadata db) 1
 
+deleteObject :: Database -> ObjectID -> STM ()
+deleteObject db oid = do
+    freeID oid 1 (mdGenObjectID $ dMetadata db)
+    SM.delete oid $ gdObjects $ dData db
+    writeTChan (dWrites db) (DeletedObject oid)
+
+
+readRelation :: Database ->RelationID -> STM Relation
+readRelation db oid = do
+    mo <- SM.lookup oid $ gdRelations $ dData db
+    case  mo of
+        Just o -> return o
+        Nothing -> retry
+
+writeRelation :: Database -> Maybe RelationID -> Relation -> STM RelationID
+writeRelation db mid o = do
+        i <- getID mid
+        SM.insert o i $ gdRelations $ dData db
+        writeTChan (dWrites db) (WrittenRelation i o)
+        return i
+    where
+        getID (Just i)= return i
+        getID _ = nextID (mdGenRelationID $ dMetadata db) 1
+
+deleteRelation :: Database -> RelationID -> STM ()
+deleteRelation db oid = do
+    freeID oid 1 (mdGenRelationID $ dMetadata db)
+    SM.delete oid $ gdRelations $ dData db
+    writeTChan (dWrites db) (DeletedRelation oid)
+
+readProperty :: Database ->PropertyID -> STM (Property,PropertyValue)
+readProperty db oid = do
+    mo <- SM.lookup oid $ gdProperties $ dData db
+    case  mo of
+        Just o -> return o
+        Nothing -> retry
+
+writeProperty :: Database -> Maybe PropertyID -> ((PropertyTypeID,PropertyID),PropertyValue) -> STM PropertyID
+writeProperty db mid ((tid,next),v) = do
+        let bs= toBin v
+        let l = BS.length bs
+        (i,off) <- getID mid l
+        let p= Property tid next off l
+        SM.insert (p,v) i $ gdProperties $ dData db
+        writeTChan (dWrites db) (WrittenProperty i (p,bs))
+        return i
+    where
+        getID (Just i) l = do
+            mo <- SM.lookup i $ gdProperties $ dData db
+            case  mo of
+                Just (pold,_) -> do
+                    if (pLength pold==l)
+                        then return (i,pOffset pold)
+                        else do
+                            freeID (pOffset pold) (pLength pold) (mdGenPropertyOffset $ dMetadata db)
+                            off <- getOff l
+                            return (i,off)
+                Nothing -> do
+                    off <-  getOff l
+                    return (i,off)
+        getID _  l = do
+            i <- nextID (mdGenPropertyID $ dMetadata db) 1
+            off <- getOff l
+            return (i,off)
+        getOff l = nextID (mdGenPropertyOffset $ dMetadata db) l
+
+deleteProperty :: Database -> PropertyID -> STM ()
+deleteProperty db oid = do
+    mo <- SM.lookup oid $ gdProperties $ dData db
+    case  mo of
+        Just (pold,_) ->
+            freeID (pOffset pold) (pLength pold) (mdGenPropertyOffset $ dMetadata db)
+        Nothing -> return ()
+    freeID oid 1 (mdGenPropertyID $ dMetadata db)
+    SM.delete oid $ gdProperties $ dData db
+    writeTChan (dWrites db) (DeletedProperty oid)

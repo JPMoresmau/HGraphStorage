@@ -69,6 +69,65 @@ spec =
         mdl2 <- atomically $ getModel db1
         mdl2 `shouldBe` mdl1Exp
         close db1
+    it "provides object operations" $ do
+        dir <- testEmptyDir
+        db0 <- open dir def
+        let o0= Object 1 2 3 4
+        oid0 <- atomically $ writeObject db0 Nothing o0
+        oid0 `shouldBe`  1
+        o1 <- atomically $ readObject db0 oid0
+        o1 `shouldBe` o0
+        let o2= Object 5 6 7 8
+        oid1 <- atomically $ writeObject db0 (Just oid0) o2
+        oid1 `shouldBe`  oid0
+        o3 <- atomically $ readObject db0 oid0
+        o3 `shouldBe` o2
+        atomically $ deleteObject db0 oid0
+        oid2 <- atomically $ writeObject db0 Nothing o0
+        oid2 `shouldBe`  1
+        atomically $ deleteObject db0 oid2
+    it "provides relation operations" $ do
+        dir <- testEmptyDir
+        db0 <- open dir def
+        let o0= Relation 1 2 3 4 5 6 7 8
+        oid0 <- atomically $ writeRelation db0 Nothing o0
+        oid0 `shouldBe`  1
+        o1 <- atomically $ readRelation db0 oid0
+        o1 `shouldBe` o0
+        let o2= Relation 8 7 6 5 4 3 2 1
+        oid1 <- atomically $ writeRelation db0 (Just oid0) o2
+        oid1 `shouldBe`  oid0
+        o3 <- atomically $ readRelation db0 oid0
+        o3 `shouldBe` o2
+        atomically $ deleteRelation db0 oid0
+        oid2 <- atomically $ writeRelation db0 Nothing o0
+        oid2 `shouldBe`  1
+        atomically $ deleteRelation db0 oid2
+    it "provides property operations" $ do
+        dir <- testEmptyDir
+        db0 <- open dir def
+        let p0=Property 1 2 0 5
+        let v0=PVText "hello"
+        pid0 <- atomically $ writeProperty db0 Nothing ((1,2),v0)
+        pid0 `shouldBe` 1
+        pv1 <- atomically $ readProperty db0 pid0
+        pv1 `shouldBe` (p0,v0)
+        let v1=PVText "world"
+        pid1 <- atomically $ writeProperty db0 (Just pid0) ((1,2),v1)
+        pid1 `shouldBe` pid0
+        pv2 <- atomically $ readProperty db0 pid1
+        pv2 `shouldBe` (p0,v1)
+        let v2=PVText "longer"
+        pid2 <- atomically $ writeProperty db0 (Just pid0) ((1,2),v2)
+        pid2 `shouldBe` pid0
+        pv3 <- atomically $ readProperty db0 pid2
+        pv3 `shouldBe` (Property 1 2 0 6,v2)
+        atomically $ deleteProperty db0 pid2
+        pid3 <- atomically $ writeProperty db0 Nothing ((1,2),v0)
+        pid3 `shouldBe` 1
+        pv4 <- atomically $ readProperty db0 pid3
+        pv4 `shouldBe` (p0,v0)
+        atomically $ deleteProperty db0 pid3
 
 testEmptyDir = do
     tmp<-getTemporaryDirectory

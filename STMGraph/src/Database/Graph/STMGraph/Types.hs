@@ -437,7 +437,7 @@ data WriteEvent =
     WrittenModel Model
   | WrittenObject ObjectID Object
   | WrittenRelation RelationID Relation
-  | WrittenProperty PropertyID Property PropertyValue
+  | WrittenProperty PropertyID (Property,BS.ByteString)
   | DeletedObject ObjectID
   | DeletedRelation RelationID
   | DeletedProperty PropertyID
