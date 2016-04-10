@@ -16,6 +16,7 @@
 module Database.Graph.STMGraph.Raw
     ( open
     , close
+    , checkpoint
     , getModel
     , updateModel
     , readObject
@@ -88,6 +89,13 @@ close :: Database -> IO ()
 close Database{..} = do
     atomically $ writeTChan dWrites ClosedDatabase
     takeMVar dWriterThread
+
+checkpoint :: Database -> IO ()
+checkpoint Database{..} = do
+    mv <- newEmptyMVar
+    atomically $ writeTChan dWrites (Checkpoint mv)
+    takeMVar mv
+
 
 load :: Handles -> MVar() -> IO Database
 load h@Handles{..} mv = do
@@ -183,6 +191,12 @@ writer hs@Handles{..} tc = do
             hClose hProperties
             hClose hPropertyValues
             return ()
+        handle (Checkpoint mv) = do
+            hFlush hObjects
+            hFlush hRelations
+            hFlush hProperties
+            hFlush hPropertyValues
+            putMVar mv ()
         handle (WrittenModel mdl) = writeFile hModel (modelToString mdl)
         handle (WrittenObject oid obj) = writeGeneric hObjects objectSize oid obj
         handle (WrittenRelation rid rel) = writeGeneric hRelations relationSize rid rel

@@ -19,9 +19,11 @@ import Test.Hspec
 import Test.QuickCheck
 import Test.QuickCheck.Instances
 
+import Database.Graph.STMGraph.Constants
 import Database.Graph.STMGraph.Raw
 import Database.Graph.STMGraph.Types
 
+import Control.Exception
 import Control.Monad
 import Control.Monad.STM
 
@@ -32,10 +34,13 @@ import System.Directory
 import System.FilePath
 import Control.Concurrent.Async
 
+import System.Posix
+import System.FilePath
+
 import qualified Data.Text as T
 
 spec :: Spec
-spec =
+spec = do
   describe "Model operations" $ do
     it "modifies and saves model" $ do
         dir <- testEmptyDir
@@ -69,6 +74,7 @@ spec =
         mdl2 <- atomically $ getModel db1
         mdl2 `shouldBe` mdl1Exp
         close db1
+  describe "Basic operations" $ do
     it "provides object operations" $ do
         dir <- testEmptyDir
         db0 <- open dir def
@@ -86,6 +92,7 @@ spec =
         oid2 <- atomically $ writeObject db0 Nothing o0
         oid2 `shouldBe`  1
         atomically $ deleteObject db0 oid2
+        close db0
     it "provides relation operations" $ do
         dir <- testEmptyDir
         db0 <- open dir def
@@ -103,6 +110,7 @@ spec =
         oid2 <- atomically $ writeRelation db0 Nothing o0
         oid2 `shouldBe`  1
         atomically $ deleteRelation db0 oid2
+        close db0
     it "provides property operations" $ do
         dir <- testEmptyDir
         db0 <- open dir def
@@ -128,6 +136,21 @@ spec =
         pv4 <- atomically $ readProperty db0 pid3
         pv4 `shouldBe` (p0,v0)
         atomically $ deleteProperty db0 pid3
+        close db0
+  describe "Misc" $ do
+    it "supports checkpointing" $ do
+        dir <- testEmptyDir
+        db0 <- open dir def
+        let objF = dir </> objectFile
+        ms0 <- getFileSize objF
+        ms0 `shouldBe` 0
+        let o0= Object 1 2 3 4
+        oid0 <- atomically $ writeObject db0 Nothing o0
+        checkpoint db0
+        ms1 <- getFileSize objF
+        ms1 `shouldBe` (COff objectSize)
+        atomically $ deleteObject db0 oid0
+        close db0
 
 testEmptyDir = do
     tmp<-getTemporaryDirectory
@@ -136,3 +159,7 @@ testEmptyDir = do
     when ex $
         removeDirectoryRecursive dir
     return dir
+
+-- |  <http://stackoverflow.com/questions/5620332/what-is-the-best-way-to-retrieve-the-size-of-a-file-in-haskell>
+getFileSize :: String -> IO FileOffset
+getFileSize path = fileSize <$> getFileStatus path

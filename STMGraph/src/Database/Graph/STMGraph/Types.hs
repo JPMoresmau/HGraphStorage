@@ -442,7 +442,8 @@ data WriteEvent =
   | DeletedRelation RelationID
   | DeletedProperty PropertyID
   | ClosedDatabase
-  deriving (Show,Read,Eq,Ord,Typeable,Generic)
+  | Checkpoint (MVar ())
+  deriving (Eq,Typeable,Generic)
 
 data Database = Database
   { dMetadata :: MetaData
