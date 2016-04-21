@@ -28,9 +28,10 @@ import Control.Concurrent.Async
 import Control.Monad.STM
 import qualified STMContainers.Map as SM
 import Control.Concurrent.STM.TVar
+import qualified Data.Aeson as A
 
 spec :: Spec
-spec =
+spec = do
   describe "Basic operations" $ do
     it "serializes models correctly" $ property $
         \x -> (stringToModel . modelToString) x == x
@@ -57,7 +58,9 @@ spec =
         atomically $ freeID i5 1 ig
         m <- atomically $ readTVar (freeIDs ig)
         DM.null m `shouldBe` True
-
+  describe "value operations" $ do
+    it "serializes values correctly" $ property $
+        \x -> (toValue (valueType x) (toBin x)) == x
 
 instance (Ord a, Ord b,Arbitrary a, Arbitrary b)=> Arbitrary (Lookup a b) where
   arbitrary = lookupFromList <$> arbitrary
@@ -67,3 +70,9 @@ instance Arbitrary Model where
 
 instance Arbitrary DataType where
     arbitrary = oneof [return DTText, return DTInteger, return DTBinary]
+
+instance Arbitrary A.Value where
+  arbitrary = oneof [A.String <$> arbitrary,A.Number <$> arbitrary,A.Bool <$> arbitrary]
+
+instance Arbitrary PropertyValue where
+  arbitrary = oneof [PVText <$> arbitrary,PVInteger <$> arbitrary,PVBinary <$> arbitrary, PVJSON <$> arbitrary]

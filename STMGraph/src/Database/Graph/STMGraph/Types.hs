@@ -42,6 +42,9 @@ import           System.IO
 import qualified ListT
 import Data.Hashable
 import Focus
+import qualified Data.Aeson as A
+import qualified Data.Aeson.Parser as A
+import qualified Data.Attoparsec.ByteString as A
 
 -- | IDs for objects
 type ObjectID       = Int64
@@ -189,7 +192,7 @@ propertySize :: Int64
 propertySize = binLength (def::Property)
 
 -- | the supported data types for properties
-data DataType = DTText | DTInteger | DTBinary
+data DataType = DTText | DTInteger | DTBinary | DTJSON
   deriving (Show,Read,Eq,Ord,Bounded,Enum,Typeable)
 
 -- | Convert a DataType object to its ID
@@ -205,26 +208,32 @@ data PropertyValue =
     PVText    T.Text
   | PVInteger Integer
   | PVBinary  BS.ByteString
-  deriving (Show,Read,Eq,Ord,Typeable)
+  | PVJSON    A.Value
+  deriving (Show,Read,Eq,Typeable)
 
 -- | Get the data type for a given value
 valueType :: PropertyValue -> DataType
 valueType (PVText _) = DTText
 valueType (PVInteger _) = DTInteger
 valueType (PVBinary _) = DTBinary
+valueType (PVJSON _) = DTJSON
 
 -- | Convert a property value to a bytestring
 toBin :: PropertyValue -> BS.ByteString
 toBin (PVBinary bs) = bs
 toBin (PVText t) = BS.fromStrict $ encodeUtf8 t
 toBin (PVInteger i) = encode i
-
+toBin (PVJSON j) = A.encode j
 
 -- | Convert a bytestring to a propertyvalue
 toValue :: DataType -> BS.ByteString -> PropertyValue
 toValue DTBinary  = PVBinary
 toValue DTText    = PVText . decodeUtf8 . BS.toStrict
 toValue DTInteger = PVInteger . decode
+toValue DTJSON    = PVJSON . fm . A.decode
+  where
+      fm (Just r)= r
+      fm _ = error "Typed.toValue: cannot parse JSON value"
 
 data ObjectType = ObjectType
   { otID :: ObjectTypeID
