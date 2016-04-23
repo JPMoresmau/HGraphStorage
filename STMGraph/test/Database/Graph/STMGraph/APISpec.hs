@@ -33,14 +33,14 @@ import qualified Data.Text as T
 
 spec :: Spec
 spec = do
-  describe "Vertex operations" $ do
-    it "creates vertex" $ do
+  describe "Update operations" $ do
+    it "creates node" $ do
         dir <- testEmptyDir
         db0 <- open dir def
-        oid1 <- atomically $ addVertex db0 "type1" [TextP "name" "obj0",IntP "cnt" 1]
+        oid1 <- atomically $ addNode db0 "type1" [TextP "name" "obj0",IntP "cnt" 1]
         oid1 `shouldBe` 1
-        o1 <- atomically $ readObject db0 oid1
-        o1 `shouldBe` (Object 1 def def 2)
+        o1 <- atomically $ readNode db0 oid1
+        o1 `shouldBe` (Node 1 def def 2)
         (p1,pv1) <- atomically $ readProperty db0 1
         pv1 `shouldBe` (PVText "obj0")
         pNext p1 `shouldBe` def

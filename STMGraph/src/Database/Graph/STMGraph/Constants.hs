@@ -16,14 +16,14 @@ module Database.Graph.STMGraph.Constants where
 
 
 
--- | The name of the object file
-objectFile :: FilePath
-objectFile = "objects.db"
+-- | The name of the node file
+nodeFile :: FilePath
+nodeFile = "nodes.db"
 
 
--- | The name of the relation file
-relationFile :: FilePath
-relationFile = "relations.db"
+-- | The name of the edge file
+edgeFile :: FilePath
+edgeFile = "edges.db"
 
 -- | The name of the property file
 propertyFile :: FilePath

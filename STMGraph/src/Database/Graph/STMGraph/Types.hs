@@ -48,17 +48,17 @@ import qualified Data.Aeson as A
 import qualified Data.Aeson.Parser as A
 import qualified Data.Attoparsec.ByteString as A
 
--- | IDs for objects
-type ObjectID       = Int64
+-- | IDs for Nodes
+type NodeID       = Int64
 
--- | IDs for types of objects
-type ObjectTypeID   = Int16
+-- | IDs for types of Nodes
+type NodeTypeID   = Int16
 
--- | IDs for relations
-type RelationID     = Int64
+-- | IDs for Edges
+type EdgeID     = Int64
 
--- | IDs for types of relations
-type RelationTypeID = Int16
+-- | IDs for types of Edges
+type EdgeTypeID = Int16
 
 -- | IDs for property values
 type PropertyID     = Int64
@@ -75,69 +75,69 @@ type PropertyValueOffset = Int64
 -- | Length of property value on value file
 type PropertyValueLength = Int64
 
--- | An object as represented in the object file
-data Object = Object
+-- | An Node as represented in the Node file
+data Node = Node
   {
-    oType          :: ObjectTypeID -- ^ type of object
-  , oFirstFrom     :: RelationID   -- ^ first relation starting from the object
-  , oFirstTo       :: RelationID   -- ^ first relation arriving at the object
+    oType          :: NodeTypeID -- ^ type of Node
+  , oFirstFrom     :: EdgeID   -- ^ first Edge starting from the Node
+  , oFirstTo       :: EdgeID   -- ^ first Edge arriving at the Node
   , oFirstProperty :: PropertyID -- ^ first property
   } deriving (Show,Read,Eq,Ord,Typeable,Generic)
 
 -- | Simple binary instance
-instance Binary Object
+instance Binary Node
 
 -- | Simple default instance
-instance Default Object where
-  def = Object 0 0 0 0
+instance Default Node where
+  def = Node 0 0 0 0
 
 -- | Storable dictionary
-storeObject :: Store.Dictionary Object
-storeObject = Store.run $
-  Object
+storeNode :: Store.Dictionary Node
+storeNode = Store.run $
+  Node
      <$> Store.element oType
      <*> Store.element oFirstFrom
      <*> Store.element oFirstTo
      <*> Store.element oFirstProperty
 
 -- | Storable instance
-instance Storable Object where
-    sizeOf = Store.sizeOf storeObject
-    alignment = Store.alignment storeObject
-    peek = Store.peek storeObject
-    poke = Store.poke storeObject
+instance Storable Node where
+    sizeOf = Store.sizeOf storeNode
+    alignment = Store.alignment storeNode
+    peek = Store.peek storeNode
+    poke = Store.poke storeNode
 
--- | Size of an object record
-objectSize :: Int64
-objectSize = binLength (def::Object)
+-- | Size of an Node record
+nodeSize :: Int64
+nodeSize = binLength (def::Node)
 
--- | Calculates the length of the binary serialization of the given object
+-- | Calculates the length of the binary serialization of the given Node
 binLength :: (Binary b) => b -> Int64
 binLength = BS.length . encode
 
--- | A relation as represented in the relation file
-data Relation = Relation
-  { rFrom          :: ObjectID  -- ^ origin object
-  , rFromType      :: ObjectTypeID -- ^ origin object type
-  , rTo            :: ObjectID -- ^ target object
-  , rToType        :: ObjectTypeID -- ^ target object type
-  , rType          :: RelationTypeID -- ^ type of the relation
-  , rFromNext      :: RelationID -- ^ next relation of origin object
-  , rToNext        :: RelationID -- ^ next relation of target object
+-- | A Edge as represented in the Edge file
+data Edge = Edge
+  { rFrom          :: NodeID  -- ^ origin Node
+  , rFromType      :: NodeTypeID -- ^ origin Node type
+  , rTo            :: NodeID -- ^ target Node
+  , rToType        :: NodeTypeID -- ^ target Node type
+  , rType          :: EdgeTypeID -- ^ type of the Edge
+  , rFromNext      :: EdgeID -- ^ next Edge of origin Node
+  , rToNext        :: EdgeID -- ^ next Edge of target Node
   , rFirstProperty :: PropertyID -- ^ first property id
   } deriving (Show,Read,Eq,Ord,Typeable,Generic)
 
 -- | simple binary instance
-instance Binary Relation
+instance Binary Edge
 
 -- | simple default instance
-instance Default Relation where
-  def  = Relation 0 0 0 0 0 0 0 0
+instance Default Edge where
+  def  = Edge 0 0 0 0 0 0 0 0
 
 -- | Storable dictionary
-storeRelation :: Store.Dictionary Relation
-storeRelation = Store.run $
-  Relation
+storeEdge :: Store.Dictionary Edge
+storeEdge = Store.run $
+  Edge
      <$> Store.element rFrom
      <*> Store.element rFromType
      <*> Store.element rTo
@@ -148,15 +148,15 @@ storeRelation = Store.run $
      <*> Store.element rFirstProperty
 
 -- | Storable instance
-instance Storable Relation where
-    sizeOf = Store.sizeOf storeRelation
-    alignment = Store.alignment storeRelation
-    peek = Store.peek storeRelation
-    poke = Store.poke storeRelation
+instance Storable Edge where
+    sizeOf = Store.sizeOf storeEdge
+    alignment = Store.alignment storeEdge
+    peek = Store.peek storeEdge
+    poke = Store.poke storeEdge
 
--- | size of a relation record
-relationSize :: Int64
-relationSize =  binLength (def::Relation)
+-- | size of a Edge record
+edgeSize :: Int64
+edgeSize =  binLength (def::Edge)
 
 -- | A property as represented in the property file
 data Property = Property
@@ -197,11 +197,11 @@ propertySize = binLength (def::Property)
 data DataType = DTText | DTInteger | DTBinary | DTJSON
   deriving (Show,Read,Eq,Ord,Bounded,Enum,Typeable)
 
--- | Convert a DataType object to its ID
+-- | Convert a DataType Node to its ID
 dataTypeID :: DataType -> DataTypeID
 dataTypeID = fromIntegral . fromEnum
 
--- | Convert a DataType ID to the Haskell object
+-- | Convert a DataType ID to the Haskell Node
 dataType :: DataTypeID -> DataType
 dataType = toEnum . fromIntegral
 
@@ -240,8 +240,8 @@ toValue DTJSON    = PVJSON . fm . A.decode
       fm (Just r)= r
       fm _ = error "Typed.toValue: cannot parse JSON value"
 
-data ObjectType = ObjectType
-  { otID :: ObjectTypeID
+data NodeType = NodeType
+  { otID :: NodeTypeID
   , otName :: T.Text
   } deriving (Show,Read,Eq,Ord,Typeable,Generic)
 
@@ -254,8 +254,8 @@ data PropertyType = PropertyType
   } deriving (Show,Read,Eq,Ord,Typeable,Generic)
 
 
-data RelationType = RelationType
-  { rtID :: RelationTypeID
+data EdgeType = EdgeType
+  { rtID :: EdgeTypeID
   , rtName :: T.Text
   } deriving (Show,Read,Eq,Ord,Typeable,Generic)
 
@@ -290,14 +290,14 @@ lookupFromList  = foldr go def
 
 
 data Model = Model
-  { mObjectTypes   :: Lookup ObjectTypeID T.Text
-  , mRelationTypes :: Lookup RelationTypeID T.Text
+  { mNodeTypes   :: Lookup NodeTypeID T.Text
+  , mEdgeTypes :: Lookup EdgeTypeID T.Text
   , mPropertyTypes :: Lookup PropertyTypeID (T.Text,DataType)
   } deriving (Show,Read,Eq,Ord,Typeable,Generic)
 
 modelToString :: Model -> String
-modelToString Model{..} = show (DM.toAscList $ toName mObjectTypes,
-    DM.toAscList $ toName mRelationTypes,
+modelToString Model{..} = show (DM.toAscList $ toName mNodeTypes,
+    DM.toAscList $ toName mEdgeTypes,
     DM.toAscList $ toName mPropertyTypes)
 
 stringToModel :: String -> Model
@@ -419,8 +419,8 @@ newIDGen st= IDGen <$> newTVar st <*> newTVar DM.empty
 
 data MetaData = MetaData
   { mdModel :: TVar Model
-  ,  mdGenObjectID :: IDGen
-  ,  mdGenRelationID :: IDGen
+  ,  mdGenNodeID :: IDGen
+  ,  mdGenEdgeID :: IDGen
   ,  mdGenPropertyID :: IDGen
   ,  mdGenPropertyOffset :: IDGen
   }
@@ -435,8 +435,8 @@ newMetaData = MetaData
 
 
 data GraphData = GraphData
-  { gdObjects :: SM.Map ObjectID Object
-  , gdRelations :: SM.Map RelationID Relation
+  { gdNodes :: SM.Map NodeID Node
+  , gdEdges :: SM.Map EdgeID Edge
   , gdProperties :: SM.Map PropertyID (Property,PropertyValue)
  }
 
@@ -449,11 +449,11 @@ newGraphData = GraphData
 
 data WriteEvent =
     WrittenModel Model
-  | WrittenObject ObjectID Object
-  | WrittenRelation RelationID Relation
+  | WrittenNode NodeID Node
+  | WrittenEdge EdgeID Edge
   | WrittenProperty PropertyID (Property,BS.ByteString)
-  | DeletedObject ObjectID
-  | DeletedRelation RelationID
+  | DeletedNode NodeID
+  | DeletedEdge EdgeID
   | DeletedProperty PropertyID
   | ClosedDatabase
   | Checkpoint (MVar ())
@@ -475,15 +475,15 @@ newDatabase mv = Database
 
 -- | Handles to the various files
 data Handles =  Handles
-  { hObjects        :: Handle
-  , hRelations      :: Handle
+  { hNodes        :: Handle
+  , hEdges      :: Handle
   , hProperties     :: Handle
   , hPropertyValues :: Handle
   , hModel :: FilePath
   } -- ^ Direct Handles
 --  |  MMHandles
---  { mhObjects        :: MMapHandle Object
---  , mhRelations      :: MMapHandle Relation
+--  { mhNodes        :: MMapHandle Node
+--  , mhEdges      :: MMapHandle Edge
 --  , mhProperties     :: MMapHandle Property
 --  , mhPropertyValues :: MMapHandle Word8
 --  , hModel :: FilePath

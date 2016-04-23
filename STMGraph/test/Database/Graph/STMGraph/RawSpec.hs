@@ -47,7 +47,7 @@ spec = do
         db0 <- open dir def
         mdl0 <- atomically $ getModel db0
         mdl0 `shouldBe` def
-        let f mdl = mdl{mObjectTypes=addToLookup 0 "type0" (mObjectTypes mdl)}
+        let f mdl = mdl{mNodeTypes=addToLookup 0 "type0" (mNodeTypes mdl)}
         let mdl1Exp = f mdl0
         atomically $ updateModel f db0
         mdl1 <- atomically $ getModel db0
@@ -62,7 +62,7 @@ spec = do
         db0 <- open dir def
         mdl0 <- atomically $ getModel db0
         mdl0 `shouldBe` def
-        let f n mdl = mdl{mObjectTypes=addToLookup n (T.pack  ("type"++show n)) (mObjectTypes mdl)}
+        let f n mdl = mdl{mNodeTypes=addToLookup n (T.pack  ("type"++show n)) (mNodeTypes mdl)}
         let modelOp db n = atomically $ updateModel (f n) db
         asyncs <- forM [1..10] $ \n-> async $ 25 `replicateM_` modelOp db0 n
         forM_ asyncs wait
@@ -75,41 +75,41 @@ spec = do
         mdl2 `shouldBe` mdl1Exp
         close db1
   describe "Basic operations" $ do
-    it "provides object operations" $ do
+    it "provides node operations" $ do
         dir <- testEmptyDir
         db0 <- open dir def
-        let o0= Object 1 2 3 4
-        oid0 <- atomically $ writeObject db0 Nothing o0
+        let o0= Node 1 2 3 4
+        oid0 <- atomically $ writeNode db0 Nothing o0
         oid0 `shouldBe`  1
-        o1 <- atomically $ readObject db0 oid0
+        o1 <- atomically $ readNode db0 oid0
         o1 `shouldBe` o0
-        let o2= Object 5 6 7 8
-        oid1 <- atomically $ writeObject db0 (Just oid0) o2
+        let o2= Node 5 6 7 8
+        oid1 <- atomically $ writeNode db0 (Just oid0) o2
         oid1 `shouldBe`  oid0
-        o3 <- atomically $ readObject db0 oid0
+        o3 <- atomically $ readNode db0 oid0
         o3 `shouldBe` o2
-        atomically $ deleteObject db0 oid0
-        oid2 <- atomically $ writeObject db0 Nothing o0
+        atomically $ deleteNode db0 oid0
+        oid2 <- atomically $ writeNode db0 Nothing o0
         oid2 `shouldBe`  1
-        atomically $ deleteObject db0 oid2
+        atomically $ deleteNode db0 oid2
         close db0
-    it "provides relation operations" $ do
+    it "provides edge operations" $ do
         dir <- testEmptyDir
         db0 <- open dir def
-        let o0= Relation 1 2 3 4 5 6 7 8
-        oid0 <- atomically $ writeRelation db0 Nothing o0
+        let o0= Edge 1 2 3 4 5 6 7 8
+        oid0 <- atomically $ writeEdge db0 Nothing o0
         oid0 `shouldBe`  1
-        o1 <- atomically $ readRelation db0 oid0
+        o1 <- atomically $ readEdge db0 oid0
         o1 `shouldBe` o0
-        let o2= Relation 8 7 6 5 4 3 2 1
-        oid1 <- atomically $ writeRelation db0 (Just oid0) o2
+        let o2= Edge 8 7 6 5 4 3 2 1
+        oid1 <- atomically $ writeEdge db0 (Just oid0) o2
         oid1 `shouldBe`  oid0
-        o3 <- atomically $ readRelation db0 oid0
+        o3 <- atomically $ readEdge db0 oid0
         o3 `shouldBe` o2
-        atomically $ deleteRelation db0 oid0
-        oid2 <- atomically $ writeRelation db0 Nothing o0
+        atomically $ deleteEdge db0 oid0
+        oid2 <- atomically $ writeEdge db0 Nothing o0
         oid2 `shouldBe`  1
-        atomically $ deleteRelation db0 oid2
+        atomically $ deleteEdge db0 oid2
         close db0
     it "provides property operations" $ do
         dir <- testEmptyDir
@@ -141,15 +141,15 @@ spec = do
     it "supports checkpointing" $ do
         dir <- testEmptyDir
         db0 <- open dir def
-        let objF = dir </> objectFile
+        let objF = dir </> nodeFile
         ms0 <- getFileSize objF
         ms0 `shouldBe` 0
-        let o0= Object 1 2 3 4
-        oid0 <- atomically $ writeObject db0 Nothing o0
+        let o0= Node 1 2 3 4
+        oid0 <- atomically $ writeNode db0 Nothing o0
         checkpoint db0
         ms1 <- getFileSize objF
-        ms1 `shouldBe` (COff objectSize)
-        atomically $ deleteObject db0 oid0
+        ms1 `shouldBe` (COff nodeSize)
+        atomically $ deleteNode db0 oid0
         close db0
 
 testEmptyDir = do

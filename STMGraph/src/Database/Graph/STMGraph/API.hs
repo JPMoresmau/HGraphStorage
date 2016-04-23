@@ -1,6 +1,6 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 module Database.Graph.STMGraph.API
-  ( addVertex
+  ( addNode
   , NameValue(..)
   )where
 
@@ -31,12 +31,12 @@ toPropertyValue (BinP n v)=(n,PVBinary v)
 toPropertyValue (JsonP n v)=(n,PVJSON v)
 
 
-addVertex :: Database -> T.Text -> [NameValue] -> STM ObjectID
-addVertex db tp props = do
+addNode :: Database -> T.Text -> [NameValue] -> STM NodeID
+addNode db tp props = do
   pid <- createProperties db props
-  tid <- getObjectTypeID db tp
-  let obj=Object tid def def pid
-  writeObject db Nothing obj
+  tid <- getNodeTypeID db tp
+  let obj=Node tid def def pid
+  writeNode db Nothing obj
 
 createProperties :: Database -> [NameValue] -> STM PropertyID
 createProperties db = foldM createProperty def . (map toPropertyValue)
@@ -49,8 +49,8 @@ createProperties db = foldM createProperty def . (map toPropertyValue)
 data Traversal
   = Composed [Traversal]
   | V
-  | HasOID ObjectID
-  | HasRID RelationID
+  | HasOID NodeID
+  | HasRID EdgeID
   | Has NameValue
   | Noop
   deriving (Show,Read,Eq,Typeable)
@@ -63,7 +63,7 @@ instance Monoid Traversal where
   mconcat = Composed
 
 data Result
- = Vertices [ObjectID]
- | Edges [RelationID]
+ = Vertices [NodeID]
+ | Edges [EdgeID]
  | Properties [[NameValue]]
  deriving (Show,Read,Eq,Typeable)

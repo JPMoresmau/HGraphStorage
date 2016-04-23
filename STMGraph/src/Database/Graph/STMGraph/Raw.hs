@@ -20,14 +20,14 @@ module Database.Graph.STMGraph.Raw
     , getModel
     , updateModel
     , getPropertyTypeID
-    , getObjectTypeID
-    , getRelationTypeID
-    , readObject
-    , writeObject
-    , deleteObject
-    , readRelation
-    , writeRelation
-    , deleteRelation
+    , getNodeTypeID
+    , getEdgeTypeID
+    , readNode
+    , writeNode
+    , deleteNode
+    , readEdge
+    , writeEdge
+    , deleteEdge
     , readProperty
     , writeProperty
     , deleteProperty
@@ -63,16 +63,16 @@ open dir gs = do
 --    if gsUseMMap gs
 --        then
 --          MMHandles
---            <$> getMMHandle objectFile
---            <*> getMMHandle relationFile
+--            <$> getMMHandle NodeFile
+--            <*> getMMHandle EdgeFile
 --            <*> getMMHandle propertyFile
 --            <*> getMMHandle propertyValuesFile
 --            <*> pure (dir </> modelFile)
 --        else
     mv <- newEmptyMVar
     hs <-     Handles
-            <$> getHandle objectFile
-            <*> getHandle relationFile
+            <$> getHandle nodeFile
+            <*> getHandle edgeFile
             <*> getHandle propertyFile
             <*> getHandle propertyValuesFile
             <*> pure (dir </> modelFile)
@@ -110,29 +110,29 @@ load h@Handles{..} mv = do
             db<- newDatabase mv
             writeTVar (mdModel $ dMetadata db) mdl
             return db
-        loadObjects h db
-        loadRelations h db
+        loadNodes h db
+        loadEdges h db
         loadProperties h mdl db
         return db
 
-loadObjects :: Handles -> Database -> IO()
-loadObjects Handles{..} Database{..} = foldAllGeneric hObjects objectSize addObject addObjectID
+loadNodes :: Handles -> Database -> IO()
+loadNodes Handles{..} Database{..} = foldAllGeneric hNodes nodeSize addNode addNodeID
     where
-        addObject (i,o) = atomically $ do
-            SM.insert o i (gdObjects dData)
-            writeTVar (maxID $ mdGenObjectID dMetadata) i
-        addObjectID i = atomically $ do
-            freeID i 1 (mdGenObjectID dMetadata)
+        addNode (i,o) = atomically $ do
+            SM.insert o i (gdNodes dData)
+            writeTVar (maxID $ mdGenNodeID dMetadata) i
+        addNodeID i = atomically $ do
+            freeID i 1 (mdGenNodeID dMetadata)
             return ()
 
-loadRelations :: Handles -> Database -> IO()
-loadRelations Handles{..} Database{..} = void $ foldAllGeneric hRelations relationSize addRelation addRelationID
+loadEdges :: Handles -> Database -> IO()
+loadEdges Handles{..} Database{..} = void $ foldAllGeneric hEdges edgeSize addEdge addEdgeID
     where
-        addRelation (i,o) = atomically $ do
-            SM.insert o i (gdRelations dData)
-            writeTVar (maxID $ mdGenRelationID dMetadata) i
-        addRelationID i = atomically $ do
-            freeID i 1 (mdGenRelationID dMetadata)
+        addEdge (i,o) = atomically $ do
+            SM.insert o i (gdEdges dData)
+            writeTVar (maxID $ mdGenEdgeID dMetadata) i
+        addEdgeID i = atomically $ do
+            freeID i 1 (mdGenEdgeID dMetadata)
             return ()
 
 loadProperties :: Handles -> Model -> Database -> IO()
@@ -163,7 +163,7 @@ readPropertyValue Handles{..} dt off len = do
   hSeek h AbsoluteSeek (fromIntegral off)
   toValue dt <$> BS.hGet h (fromIntegral len)
 
--- | Read all binary objects from a given handle, generating their IDs from their offset
+-- | Read all binary Nodes from a given handle, generating their IDs from their offset
 foldAllGeneric
   :: (Integral a, Eq b, Binary b, Default b)
   => Handle -> Int64
@@ -191,26 +191,26 @@ writer hs@Handles{..} tc = do
     unless (e == ClosedDatabase) $ writer hs tc
     where
         handle ClosedDatabase = do
-            hClose hObjects
-            hClose hRelations
+            hClose hNodes
+            hClose hEdges
             hClose hProperties
             hClose hPropertyValues
             return ()
         handle (Checkpoint mv) = do
-            hFlush hObjects
-            hFlush hRelations
+            hFlush hNodes
+            hFlush hEdges
             hFlush hProperties
             hFlush hPropertyValues
             putMVar mv ()
         handle (WrittenModel mdl) = writeFile hModel (modelToString mdl)
-        handle (WrittenObject oid obj) = writeGeneric hObjects objectSize oid obj
-        handle (WrittenRelation rid rel) = writeGeneric hRelations relationSize rid rel
+        handle (WrittenNode oid obj) = writeGeneric hNodes nodeSize oid obj
+        handle (WrittenEdge rid rel) = writeGeneric hEdges edgeSize rid rel
         handle (WrittenProperty pid (pro,val)) = do
             writeGeneric hProperties propertySize pid pro
             hSeek hPropertyValues AbsoluteSeek (toInteger $ pOffset pro)
             BS.hPut hPropertyValues val
-        handle (DeletedObject oid) = writeGeneric hObjects objectSize oid (def::Object)
-        handle (DeletedRelation rid) = writeGeneric hRelations relationSize rid (def::Relation)
+        handle (DeletedNode oid) = writeGeneric hNodes nodeSize oid (def::Node)
+        handle (DeletedEdge rid) = writeGeneric hEdges edgeSize rid (def::Edge)
         handle (DeletedProperty pid) = writeGeneric hProperties propertySize pid (def::Property)
 
 
@@ -252,82 +252,82 @@ getPropertyTypeID db p = do
       return ptid
 
 
-getObjectTypeID :: Database -> T.Text -> STM ObjectTypeID
-getObjectTypeID db n = do
+getNodeTypeID :: Database -> T.Text -> STM NodeTypeID
+getNodeTypeID db n = do
   let tv = mdModel $ dMetadata db
   mdl <- readTVar tv
-  let mptid = DM.lookup n $ fromName $ mObjectTypes mdl
+  let mptid = DM.lookup n $ fromName $ mNodeTypes mdl
   case mptid of
     Just ptid -> return ptid
     Nothing -> do
-      let ns = toName $ mObjectTypes mdl
+      let ns = toName $ mNodeTypes mdl
           ptid = if DM.null ns
                   then 1
                   else fst (DM.findMax ns)+1
 
       updateModel (\m->
-          let pts2= addToLookup ptid n $ mObjectTypes m
-          in m{mObjectTypes=pts2}
+          let pts2= addToLookup ptid n $ mNodeTypes m
+          in m{mNodeTypes=pts2}
         ) db
       return ptid
 
-getRelationTypeID :: Database -> T.Text -> STM ObjectTypeID
-getRelationTypeID db n = do
+getEdgeTypeID :: Database -> T.Text -> STM NodeTypeID
+getEdgeTypeID db n = do
   let tv = mdModel $ dMetadata db
   mdl <- readTVar tv
-  let mptid = DM.lookup n $ fromName $ mRelationTypes mdl
+  let mptid = DM.lookup n $ fromName $ mEdgeTypes mdl
   case mptid of
     Just ptid -> return ptid
     Nothing -> do
-      let ns = toName $ mRelationTypes mdl
+      let ns = toName $ mEdgeTypes mdl
           ptid = if DM.null ns
                   then 1
                   else fst (DM.findMax ns)+1
 
       updateModel (\m->
-          let pts2= addToLookup ptid n $ mRelationTypes m
-          in m{mRelationTypes=pts2}
+          let pts2= addToLookup ptid n $ mEdgeTypes m
+          in m{mEdgeTypes=pts2}
         ) db
       return ptid
 
-readObject :: Database ->ObjectID -> STM Object
-readObject db oid = (fromMaybe def) <$> (SM.lookup oid $ gdObjects $ dData db)
+readNode :: Database ->NodeID -> STM Node
+readNode db oid = (fromMaybe def) <$> (SM.lookup oid $ gdNodes $ dData db)
 
-writeObject :: Database -> Maybe ObjectID -> Object -> STM ObjectID
-writeObject db mid o = do
+writeNode :: Database -> Maybe NodeID -> Node -> STM NodeID
+writeNode db mid o = do
         i <- getID mid
-        SM.insert o i $ gdObjects $ dData db
-        writeTChan (dWrites db) (WrittenObject i o)
+        SM.insert o i $ gdNodes $ dData db
+        writeTChan (dWrites db) (WrittenNode i o)
         return i
     where
         getID (Just i)= return i
-        getID _ = nextID (mdGenObjectID $ dMetadata db) 1
+        getID _ = nextID (mdGenNodeID $ dMetadata db) 1
 
-deleteObject :: Database -> ObjectID -> STM ()
-deleteObject db oid = do
-    freeID oid 1 (mdGenObjectID $ dMetadata db)
-    SM.delete oid $ gdObjects $ dData db
-    writeTChan (dWrites db) (DeletedObject oid)
+deleteNode :: Database -> NodeID -> STM ()
+deleteNode db oid = do
+    freeID oid 1 (mdGenNodeID $ dMetadata db)
+    SM.delete oid $ gdNodes $ dData db
+    writeTChan (dWrites db) (DeletedNode oid)
 
 
-readRelation :: Database ->RelationID -> STM Relation
-readRelation db oid = (fromMaybe def) <$> (SM.lookup oid $ gdRelations $ dData db)
+readEdge :: Database ->EdgeID -> STM Edge
+readEdge db oid = (fromMaybe def) <$> (SM.lookup oid $ gdEdges $ dData db)
 
-writeRelation :: Database -> Maybe RelationID -> Relation -> STM RelationID
-writeRelation db mid o = do
+writeEdge :: Database -> Maybe EdgeID -> Edge -> STM EdgeID
+writeEdge db mid o = do
         i <- getID mid
-        SM.insert o i $ gdRelations $ dData db
-        writeTChan (dWrites db) (WrittenRelation i o)
+        SM.insert o i $ gdEdges $ dData db
+        writeTChan (dWrites db) (WrittenEdge i o)
         return i
     where
         getID (Just i)= return i
-        getID _ = nextID (mdGenRelationID $ dMetadata db) 1
+        getID _ = nextID (mdGenEdgeID $ dMetadata db) 1
 
-deleteRelation :: Database -> RelationID -> STM ()
-deleteRelation db oid = do
-    freeID oid 1 (mdGenRelationID $ dMetadata db)
-    SM.delete oid $ gdRelations $ dData db
-    writeTChan (dWrites db) (DeletedRelation oid)
+deleteEdge :: Database -> EdgeID -> STM ()
+deleteEdge db oid = do
+    freeID oid 1 (mdGenEdgeID $ dMetadata db)
+    SM.delete oid $ gdEdges $ dData db
+    writeTChan (dWrites db) (DeletedEdge oid)
 
 readProperty :: Database ->PropertyID -> STM (Property,PropertyValue)
 readProperty db oid = (fromMaybe def) <$> (SM.lookup oid $ gdProperties $ dData db)
