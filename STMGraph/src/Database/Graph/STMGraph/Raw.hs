@@ -19,6 +19,9 @@ module Database.Graph.STMGraph.Raw
     , checkpoint
     , getModel
     , updateModel
+    , getPropertyTypeID
+    , getObjectTypeID
+    , getRelationTypeID
     , readObject
     , writeObject
     , deleteObject
@@ -37,6 +40,7 @@ import Database.Graph.STMGraph.LowLevel.MMapHandle
 import Data.Default
 import Data.Binary
 import Data.Int
+import Data.Maybe
 import Foreign.Storable
 import System.Directory
 import System.FilePath
@@ -51,6 +55,7 @@ import Control.Concurrent.STM.TChan
 import qualified STMContainers.Map as SM
 import qualified STMContainers.Set as SS
 import qualified Data.Map                               as DM
+import qualified Data.Text as T
 
 open :: FilePath -> GraphSettings -> IO Database
 open dir gs = do
@@ -220,18 +225,73 @@ updateModel upd db = do
     let tv = mdModel $ dMetadata db
     mdl <- readTVar tv
     let mdl2 = upd mdl
-    writeTVar tv $! mdl2
-    writeTChan (dWrites db) (WrittenModel mdl2)
+    when (mdl2 /= mdl) $ do
+      writeTVar tv $! mdl2
+      writeTChan (dWrites db) (WrittenModel mdl2)
 
 getModel :: Database -> STM Model
 getModel db = readTVar $ mdModel $ dMetadata db
 
+getPropertyTypeID :: Database -> (T.Text,DataType) -> STM PropertyTypeID
+getPropertyTypeID db p = do
+  let tv = mdModel $ dMetadata db
+  mdl <- readTVar tv
+  let mptid = DM.lookup p $ fromName $ mPropertyTypes mdl
+  case mptid of
+    Just ptid -> return ptid
+    Nothing -> do
+      let ns = toName $ mPropertyTypes mdl
+          ptid = if DM.null ns
+                  then 1
+                  else fst (DM.findMax ns)+1
+
+      updateModel (\m->
+          let pts2= addToLookup ptid p $ mPropertyTypes m
+          in m{mPropertyTypes=pts2}
+        ) db
+      return ptid
+
+
+getObjectTypeID :: Database -> T.Text -> STM ObjectTypeID
+getObjectTypeID db n = do
+  let tv = mdModel $ dMetadata db
+  mdl <- readTVar tv
+  let mptid = DM.lookup n $ fromName $ mObjectTypes mdl
+  case mptid of
+    Just ptid -> return ptid
+    Nothing -> do
+      let ns = toName $ mObjectTypes mdl
+          ptid = if DM.null ns
+                  then 1
+                  else fst (DM.findMax ns)+1
+
+      updateModel (\m->
+          let pts2= addToLookup ptid n $ mObjectTypes m
+          in m{mObjectTypes=pts2}
+        ) db
+      return ptid
+
+getRelationTypeID :: Database -> T.Text -> STM ObjectTypeID
+getRelationTypeID db n = do
+  let tv = mdModel $ dMetadata db
+  mdl <- readTVar tv
+  let mptid = DM.lookup n $ fromName $ mRelationTypes mdl
+  case mptid of
+    Just ptid -> return ptid
+    Nothing -> do
+      let ns = toName $ mRelationTypes mdl
+          ptid = if DM.null ns
+                  then 1
+                  else fst (DM.findMax ns)+1
+
+      updateModel (\m->
+          let pts2= addToLookup ptid n $ mRelationTypes m
+          in m{mRelationTypes=pts2}
+        ) db
+      return ptid
+
 readObject :: Database ->ObjectID -> STM Object
-readObject db oid = do
-    mo <- SM.lookup oid $ gdObjects $ dData db
-    case  mo of
-        Just o -> return o
-        Nothing -> retry
+readObject db oid = (fromMaybe def) <$> (SM.lookup oid $ gdObjects $ dData db)
 
 writeObject :: Database -> Maybe ObjectID -> Object -> STM ObjectID
 writeObject db mid o = do
@@ -251,11 +311,7 @@ deleteObject db oid = do
 
 
 readRelation :: Database ->RelationID -> STM Relation
-readRelation db oid = do
-    mo <- SM.lookup oid $ gdRelations $ dData db
-    case  mo of
-        Just o -> return o
-        Nothing -> retry
+readRelation db oid = (fromMaybe def) <$> (SM.lookup oid $ gdRelations $ dData db)
 
 writeRelation :: Database -> Maybe RelationID -> Relation -> STM RelationID
 writeRelation db mid o = do
@@ -274,11 +330,7 @@ deleteRelation db oid = do
     writeTChan (dWrites db) (DeletedRelation oid)
 
 readProperty :: Database ->PropertyID -> STM (Property,PropertyValue)
-readProperty db oid = do
-    mo <- SM.lookup oid $ gdProperties $ dData db
-    case  mo of
-        Just o -> return o
-        Nothing -> retry
+readProperty db oid = (fromMaybe def) <$> (SM.lookup oid $ gdProperties $ dData db)
 
 writeProperty :: Database -> Maybe PropertyID -> ((PropertyTypeID,PropertyID),PropertyValue) -> STM PropertyID
 writeProperty db mid ((tid,next),v) = do

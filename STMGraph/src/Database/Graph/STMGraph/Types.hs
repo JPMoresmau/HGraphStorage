@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveGeneric      #-}
@@ -210,6 +212,9 @@ data PropertyValue =
   | PVBinary  BS.ByteString
   | PVJSON    A.Value
   deriving (Show,Read,Eq,Typeable)
+
+instance Default PropertyValue where
+    def = PVBinary BS.empty
 
 -- | Get the data type for a given value
 valueType :: PropertyValue -> DataType
