@@ -20,6 +20,7 @@ module Database.Graph.STMGraph.Raw
     , getModel
     , updateModel
     , getPropertyTypeID
+    , getPropertyType
     , getNodeTypeID
     , getEdgeTypeID
     , readNode
@@ -251,6 +252,11 @@ getPropertyTypeID db p = do
         ) db
       return ptid
 
+getPropertyType :: Database -> PropertyTypeID -> STM (Maybe (T.Text,DataType))
+getPropertyType db ptid = do
+    let tv = mdModel $ dMetadata db
+    mdl <- readTVar tv
+    return $ DM.lookup ptid $ toName $ mPropertyTypes mdl
 
 getNodeTypeID :: Database -> T.Text -> STM NodeTypeID
 getNodeTypeID db n = do
