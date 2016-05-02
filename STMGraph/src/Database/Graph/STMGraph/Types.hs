@@ -78,10 +78,10 @@ type PropertyValueLength = Int64
 -- | An Node as represented in the Node file
 data Node = Node
   {
-    oType          :: NodeTypeID -- ^ type of Node
-  , oFirstFrom     :: EdgeID   -- ^ first Edge starting from the Node
-  , oFirstTo       :: EdgeID   -- ^ first Edge arriving at the Node
-  , oFirstProperty :: PropertyID -- ^ first property
+    nType          :: NodeTypeID -- ^ type of Node
+  , nFirstFrom     :: EdgeID   -- ^ first Edge starting from the Node
+  , nFirstTo       :: EdgeID   -- ^ first Edge arriving at the Node
+  , nFirstProperty :: PropertyID -- ^ first property
   } deriving (Show,Read,Eq,Ord,Typeable,Generic)
 
 -- | Simple binary instance
@@ -95,10 +95,10 @@ instance Default Node where
 storeNode :: Store.Dictionary Node
 storeNode = Store.run $
   Node
-     <$> Store.element oType
-     <*> Store.element oFirstFrom
-     <*> Store.element oFirstTo
-     <*> Store.element oFirstProperty
+     <$> Store.element nType
+     <*> Store.element nFirstFrom
+     <*> Store.element nFirstTo
+     <*> Store.element nFirstProperty
 
 -- | Storable instance
 instance Storable Node where
@@ -117,14 +117,14 @@ binLength = BS.length . encode
 
 -- | A Edge as represented in the Edge file
 data Edge = Edge
-  { rFrom          :: NodeID  -- ^ origin Node
-  , rFromType      :: NodeTypeID -- ^ origin Node type
-  , rTo            :: NodeID -- ^ target Node
-  , rToType        :: NodeTypeID -- ^ target Node type
-  , rType          :: EdgeTypeID -- ^ type of the Edge
-  , rFromNext      :: EdgeID -- ^ next Edge of origin Node
-  , rToNext        :: EdgeID -- ^ next Edge of target Node
-  , rFirstProperty :: PropertyID -- ^ first property id
+  { eFrom          :: NodeID  -- ^ origin Node
+  , eFromType      :: NodeTypeID -- ^ origin Node type
+  , eTo            :: NodeID -- ^ target Node
+  , eToType        :: NodeTypeID -- ^ target Node type
+  , eType          :: EdgeTypeID -- ^ type of the Edge
+  , eFromNext      :: EdgeID -- ^ next Edge of origin Node
+  , eToNext        :: EdgeID -- ^ next Edge of target Node
+  , eFirstProperty :: PropertyID -- ^ first property id
   } deriving (Show,Read,Eq,Ord,Typeable,Generic)
 
 -- | simple binary instance
@@ -138,14 +138,14 @@ instance Default Edge where
 storeEdge :: Store.Dictionary Edge
 storeEdge = Store.run $
   Edge
-     <$> Store.element rFrom
-     <*> Store.element rFromType
-     <*> Store.element rTo
-     <*> Store.element rToType
-     <*> Store.element rType
-     <*> Store.element rFromNext
-     <*> Store.element rToNext
-     <*> Store.element rFirstProperty
+     <$> Store.element eFrom
+     <*> Store.element eFromType
+     <*> Store.element eTo
+     <*> Store.element eToType
+     <*> Store.element eType
+     <*> Store.element eFromNext
+     <*> Store.element eToNext
+     <*> Store.element eFirstProperty
 
 -- | Storable instance
 instance Storable Edge where
