@@ -6,6 +6,7 @@ module Database.Graph.STMGraph.API
   , traverseGraph
   , Traversal(..)
   , Result(..)
+  , Info(..)
   )where
 
 import Database.Graph.STMGraph.APITypes
@@ -24,6 +25,7 @@ import qualified Data.Aeson as A
 import Data.Typeable
 import qualified ListT as ListT
 import qualified STMContainers.Map as SM
+import qualified Data.Set as S
 
 toPropertyValue :: NameValue -> (T.Text,PropertyValue)
 toPropertyValue (TextP n v)=(n,PVText v)
@@ -68,6 +70,8 @@ createProperties db = foldM createProperty def . map toPropertyValue
       ptid <- getPropertyTypeID db (name,dt)
       writeProperty db Nothing ((ptid,nid),value)
 
+
+
 getNodeProperties :: Database -> Node -> STM [NameValue]
 getNodeProperties db n = getProperties db $ nFirstProperty n
 
@@ -75,7 +79,10 @@ getEdgeProperties :: Database -> Edge -> STM [NameValue]
 getEdgeProperties db e = getProperties db $ eFirstProperty e
 
 getProperties :: Database -> PropertyID -> STM [NameValue]
-getProperties db fp = readProp fp []
+getProperties db fp = getNamedProperties db fp Nothing
+
+getNamedProperties :: Database -> PropertyID -> Maybe [T.Text] -> STM [NameValue]
+getNamedProperties db fp mfns = readProp fp []
     where
       readProp fid ls
         | fid == def = return ls
@@ -84,7 +91,12 @@ getProperties db fp = readProp fp []
             mn <- getPropertyType db (pType p)
             case mn of
                 Nothing -> error $ "unknown property type:" <> show (pType p)
-                Just n -> readProp (pNext p) (toNameValue (fst n,v):ls)
+                Just n -> readProp (pNext p) $
+                    if isFiltered mfns n
+                        then (toNameValue (fst n,v):ls)
+                        else ls
+      isFiltered Nothing _ = True
+      isFiltered (Just fns) (n,_)=n  `elem` fns
 
 nodeHasNamedValue :: Database -> Node -> NameValue -> STM Bool
 nodeHasNamedValue db n nv = do
@@ -100,8 +112,9 @@ edgeHasNamedValue db e nv = do
 traverseGraph :: Database -> Traversal -> STM Result
 traverseGraph db = doTraverse db Unknown
 
-doTraverse :: Database -> Result -> Traversal ->STM Result
+doTraverse :: Database -> Result -> Traversal -> STM Result
 doTraverse db Empty _ = return Empty
+doTraverse db r Noop = return r
 doTraverse db st (Composed ts) = foldM (doTraverse db) st ts
 doTraverse db _ Ns = return AllNodes
 doTraverse db _ Es = return AllEdges
@@ -143,7 +156,54 @@ doTraverse db AllEdges (Has nv) = do
 doTraverse db (Edges es) (Has nv) = do
     fs <- filterM (\(_,e)->edgeHasNamedValue db e nv) es
     return $ edgesIfAny fs
+doTraverse db t (Values vs) = readProperties db t (Just vs)
+doTraverse db t AllValues = readProperties db t Nothing
 doTraverse _ r t = return $ Error $ "Traversal not handled: " <> T.pack (show t) <> " in state: " <> T.pack (show r)
+
+readProperties :: Database -> Result -> Maybe [T.Text] -> STM Result
+readProperties db AllNodes mvs = do
+    let st = SM.stream $ gdNodes $ dData db
+    getPropNames mvs <$> ListT.fold (\l (nid,n)-> do
+      ps<-addNodeInfo db (nid,n) =<< getNamedProperties db (nFirstProperty n) mvs
+      return (ps:l)
+      ) [] st
+readProperties db (Nodes ns) mvs =
+    getPropNames mvs <$> mapM (\(nid,n)->addNodeInfo db (nid,n) =<< getNamedProperties db (nFirstProperty n) mvs) ns
+readProperties db AllEdges mvs = do
+    let st = SM.stream $ gdEdges $ dData db
+    getPropNames mvs <$> ListT.fold (\l (eid,e)-> do
+      ps<-addEdgeInfo db (eid,e) =<< getNamedProperties db (eFirstProperty e) mvs
+      return (ps:l)
+      ) [] st
+readProperties db (Edges es) mvs =
+    getPropNames mvs <$> mapM (\(eid,e)->addEdgeInfo db (eid,e) =<<getNamedProperties db (eFirstProperty e) mvs) es
+
+addNodeInfo :: Database -> (NodeID,Node) -> [NameValue] -> STM Info
+addNodeInfo db (nid,n) nvs = do
+    mt <- getNodeType db (nType n)
+    case mt of
+        Nothing -> error $ "unknown node type:" <> show (nType n)
+        Just t -> return $ NodeInfo nid t nvs
+
+
+addEdgeInfo :: Database -> (EdgeID,Edge) -> [NameValue] -> STM Info
+addEdgeInfo db (eid,e) nvs = do
+    mt <- getEdgeType db (eType e)
+    case mt of
+        Nothing -> error $ "unknown edge type:" <> show (eType e)
+        Just t -> return $ EdgeInfo eid t nvs
+
+
+getPropNames :: Maybe [T.Text]  -> [Info] -> Result
+getPropNames (Just vs) nvs = Properties vs nvs
+getPropNames _ nvs = Properties (ordNub $ concatMap (map name . properties) nvs) nvs
+
+ordNub :: (Ord a) => [a] -> [a]
+ordNub = go S.empty
+   where
+       go _ []     = []
+       go s (x:xs) = if x `S.member` s then go s xs
+                                     else x : go (S.insert x s) xs
 
 nodesIfAny :: [(NodeID,Node)] -> Result
 nodesIfAny [] = Empty

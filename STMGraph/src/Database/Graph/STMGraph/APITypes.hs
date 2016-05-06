@@ -29,12 +29,16 @@ import Data.Typeable
 
 
 data NameValue
-    = TextP T.Text T.Text
-    |   IntP T.Text Integer
-    |   BinP T.Text BS.ByteString
-    |   JsonP T.Text A.Value
+    = TextP {name::T.Text,tValue:: T.Text}
+    |   IntP {name::T.Text,iValue:: Integer}
+    |   BinP {name::T.Text,bValue:: BS.ByteString}
+    |   JsonP {name::T.Text,jValue:: A.Value}
     deriving (Read,Show,Eq,Typeable)
 
+data Info
+    = NodeInfo {nodeID :: NodeID, nodeType::T.Text,properties::[NameValue]}
+    |  EdgeInfo {edgeID:: EdgeID, edgeType :: T.Text, properties::[NameValue]}
+    deriving (Show,Read,Eq,Typeable)
 
 data Traversal
   = Composed [Traversal]
@@ -44,6 +48,7 @@ data Traversal
   | EID [EdgeID]
   | Has NameValue
   | Values [T.Text]
+  | AllValues
   | Noop
   deriving (Show,Read,Eq,Typeable)
 
@@ -59,7 +64,7 @@ data Result
   | Nodes [(NodeID,Node)]
   | AllEdges
   | Edges [(EdgeID,Edge)]
-  | Properties [[NameValue]]
+  | Properties [T.Text] [Info]
   | Unknown
   | Empty
   | Error T.Text

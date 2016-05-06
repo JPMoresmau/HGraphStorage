@@ -22,7 +22,9 @@ module Database.Graph.STMGraph.Raw
     , getPropertyTypeID
     , getPropertyType
     , getNodeTypeID
+    , getNodeType
     , getEdgeTypeID
+    , getEdgeType
     , readNode
     , writeNode
     , deleteNode
@@ -277,6 +279,12 @@ getNodeTypeID db n = do
         ) db
       return ptid
 
+getNodeType :: Database -> NodeTypeID -> STM (Maybe (T.Text))
+getNodeType db ntid = do
+    let tv = mdModel $ dMetadata db
+    mdl <- readTVar tv
+    return $ DM.lookup ntid $ toName $ mNodeTypes mdl
+
 getEdgeTypeID :: Database -> T.Text -> STM NodeTypeID
 getEdgeTypeID db n = do
   let tv = mdModel $ dMetadata db
@@ -295,6 +303,12 @@ getEdgeTypeID db n = do
           in m{mEdgeTypes=pts2}
         ) db
       return ptid
+
+getEdgeType :: Database -> EdgeTypeID -> STM (Maybe (T.Text))
+getEdgeType db etid = do
+    let tv = mdModel $ dMetadata db
+    mdl <- readTVar tv
+    return $ DM.lookup etid $ toName $ mEdgeTypes mdl
 
 readNode :: Database ->NodeID -> STM Node
 readNode db oid = (fromMaybe def) <$> (SM.lookup oid $ gdNodes $ dData db)
