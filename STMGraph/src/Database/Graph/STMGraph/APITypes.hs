@@ -40,6 +40,24 @@ data Info
     |  EdgeInfo {edgeID:: EdgeID, edgeType :: T.Text, properties::[NameValue]}
     deriving (Show,Read,Eq,Typeable)
 
+data EdgeRemoval
+  = CleanFrom
+  | CleanTo
+  | CleanBoth
+
+shouldCleanFrom :: EdgeRemoval -> Bool
+shouldCleanFrom CleanTo = False
+shouldCleanFrom _ = True
+
+shouldCleanTo :: EdgeRemoval -> Bool
+shouldCleanTo CleanFrom = False
+shouldCleanTo _ = True
+
+getCleaned :: Default a => EdgeRemoval -> a -> a -> a
+getCleaned CleanFrom _ to = to
+getCleaned CleanTo from _ = from
+getCleant CleanBoth _ _ = def
+
 data Traversal
   = Composed [Traversal]
   | Ns

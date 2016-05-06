@@ -1,7 +1,9 @@
 {-# LANGUAGE DeriveDataTypeable, OverloadedStrings #-}
 module Database.Graph.STMGraph.API
   ( addNode
+  , removeNode
   , addEdge
+  , removeEdge
   , NameValue(..)
   , traverseGraph
   , Traversal(..)
@@ -46,6 +48,17 @@ addNode db tp props = do
   let obj=Node tid def def pid
   writeNode db Nothing obj
 
+removeNode ::Database -> NodeID -> STM ()
+removeNode db nid = do
+    n <- readNode db nid
+    deleteProperties db $ nFirstProperty n
+    removeEdges CleanTo $ nFirstFrom n
+    removeEdges CleanFrom $ nFirstTo n
+  where
+    removeEdges rem eid
+     | eid == def = return ()
+     | otherwise = removeEdges rem =<< removeEdge' db eid rem
+
 addEdge :: Database -> NodeID -> T.Text -> [NameValue] -> NodeID -> STM EdgeID
 addEdge db from tp props to = do
   fromN<-readNode db from
@@ -62,6 +75,48 @@ addEdge' db (from,fn) tp props (to,tn) = do
   writeNode db (Just to) (tn{nFirstTo=eid})
   return eid
 
+removeEdge :: Database -> EdgeID -> STM ()
+removeEdge db eid = void $ removeEdge' db eid CleanBoth
+
+removeEdge' :: Database -> EdgeID -> EdgeRemoval -> STM EdgeID
+removeEdge' db eid rem
+  | eid == def = return def
+  | otherwise = do
+    e <- readEdge db eid
+    deleteProperties db $ eFirstProperty e
+    let nextFrom = eFromNext e
+    pidF <- if shouldCleanFrom rem
+      then do
+        let fr = eFrom e
+        n <- readNode db fr
+        let fstId = nFirstFrom n
+        if fstId == eid
+          then void $ writeNode db (Just fr) n{nFirstFrom = nextFrom}
+          else fixChain fstId eFromNext (\r -> r{eFromNext = nextFrom})
+        return def
+      else return nextFrom
+    let nextTo = eToNext e
+    pidT <- if shouldCleanTo rem
+       then do
+        let fr = eTo e
+        n <- readNode db fr
+        let fstId = nFirstTo n
+        if fstId == eid
+          then void $ writeNode db (Just fr) n{nFirstTo = nextTo}
+          else fixChain fstId eToNext (\r -> r{eToNext = nextTo})
+        return def
+      else return nextTo
+    return $ getCleaned rem pidF pidT
+  where
+    fixChain crid getNext setNext
+        | crid == def = return ()
+        | otherwise = do
+              rel <- readEdge db crid
+              let nid = getNext rel
+              if nid == eid
+                then void $ writeEdge db (Just crid) $ setNext rel
+                else fixChain nid getNext setNext
+
 createProperties :: Database -> [NameValue] -> STM PropertyID
 createProperties db = foldM createProperty def . map toPropertyValue
   where
@@ -70,6 +125,14 @@ createProperties db = foldM createProperty def . map toPropertyValue
       ptid <- getPropertyTypeID db (name,dt)
       writeProperty db Nothing ((ptid,nid),value)
 
+deleteProperties :: Database -> PropertyID -> STM()
+deleteProperties db pid
+    | pid == def =  return ()
+    | otherwise = do
+        (p,_) <- readProperty db pid
+        deleteProperty db pid
+        let nid = pNext p
+        deleteProperties db nid
 
 
 getNodeProperties :: Database -> Node -> STM [NameValue]

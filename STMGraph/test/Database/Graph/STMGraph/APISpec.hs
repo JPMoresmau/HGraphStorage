@@ -70,6 +70,45 @@ spec = do
         o1' `shouldBe` Node 1 eid2 def 2
         o2' <- atomically $ readNode db oid2
         o2' `shouldBe` Node 1 def eid2 4
+    withEmptyDB "deletes nodes" $ \db -> do
+        oid1 <- atomically $ addNode db "type1" [nm "obj1",cnt 1]
+        oid2 <- atomically $ addNode db "type1" [nm "obj2",cnt 1]
+        oid3 <- atomically $ addNode db "type1" [nm "obj3",cnt 1]
+        eid1 <- atomically $ addEdge db oid1 "ref1" [w 1] oid2
+        eid2 <- atomically $ addEdge db oid1 "ref1" [w 1] oid3
+        eid3 <- atomically $ addEdge db oid2 "ref1" [w 1] oid3
+        atomically $ removeNode db oid1
+        o2 <- atomically $ readNode db oid2
+        o2 `shouldBe` Node 1 3 0 4
+        o3 <- atomically $ readNode db oid3
+        o3 `shouldBe` Node 1 0 3 6
+    withEmptyDB "deletes edges" $ \db -> do
+        oid1 <- atomically $ addNode db "type1" [nm "obj1",cnt 1]
+        oid2 <- atomically $ addNode db "type1" [nm "obj2",cnt 1]
+        oid3 <- atomically $ addNode db "type1" [nm "obj3",cnt 1]
+        eid1 <- atomically $ addEdge db oid1 "ref1" [w 1] oid2
+        eid2 <- atomically $ addEdge db oid1 "ref1" [w 1] oid3
+        eid3 <- atomically $ addEdge db oid2 "ref1" [w 1] oid3
+        e2 <- atomically $ readEdge db eid2
+        e2 `shouldBe` Edge oid1 1 oid3 1 1 eid1 def 8
+        e3 <- atomically $ readEdge db eid3
+        e3 `shouldBe` Edge oid2 1 oid3 1 1 def eid2 9
+        atomically $ removeEdge db eid1
+        o1 <- atomically $ readNode db oid1
+        o1 `shouldBe` Node 1 2 def 2
+        o2 <- atomically $ readNode db oid2
+        o2 `shouldBe` Node 1 3 0 4
+        o3 <- atomically $ readNode db oid3
+        o3 `shouldBe` Node 1 0 3 6
+        e2' <- atomically $ readEdge db eid2
+        e2' `shouldBe` Edge oid1 1 oid3 1 1 def def 8
+        e3' <- atomically $ readEdge db eid3
+        e3' `shouldBe` Edge oid2 1 oid3 1 1 def eid2 9
+        atomically $ removeEdge db eid2
+        o1' <- atomically $ readNode db oid1
+        o1' `shouldBe` Node 1 def def 2
+        e3'' <- atomically $ readEdge db eid3
+        e3'' `shouldBe` Edge oid2 1 oid3 1 1 def def 9
   describe "Node Traversals" $ do
     withEmptyDB "finds node by id" $ \db->do
         oid1 <- atomically $ addNode db "type1" [nm "obj0",cnt 1]
