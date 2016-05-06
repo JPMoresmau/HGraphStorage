@@ -279,7 +279,7 @@ getNodeTypeID db n = do
         ) db
       return ptid
 
-getNodeType :: Database -> NodeTypeID -> STM (Maybe (T.Text))
+getNodeType :: Database -> NodeTypeID -> STM (Maybe T.Text)
 getNodeType db ntid = do
     let tv = mdModel $ dMetadata db
     mdl <- readTVar tv
@@ -304,14 +304,14 @@ getEdgeTypeID db n = do
         ) db
       return ptid
 
-getEdgeType :: Database -> EdgeTypeID -> STM (Maybe (T.Text))
+getEdgeType :: Database -> EdgeTypeID -> STM (Maybe T.Text)
 getEdgeType db etid = do
     let tv = mdModel $ dMetadata db
     mdl <- readTVar tv
     return $ DM.lookup etid $ toName $ mEdgeTypes mdl
 
 readNode :: Database ->NodeID -> STM Node
-readNode db oid = (fromMaybe def) <$> (SM.lookup oid $ gdNodes $ dData db)
+readNode db oid = fromMaybe def <$> SM.lookup oid (gdNodes $ dData db)
 
 writeNode :: Database -> Maybe NodeID -> Node -> STM NodeID
 writeNode db mid o = do
@@ -331,7 +331,7 @@ deleteNode db oid = do
 
 
 readEdge :: Database ->EdgeID -> STM Edge
-readEdge db oid = (fromMaybe def) <$> (SM.lookup oid $ gdEdges $ dData db)
+readEdge db oid = fromMaybe def <$> SM.lookup oid (gdEdges $ dData db)
 
 writeEdge :: Database -> Maybe EdgeID -> Edge -> STM EdgeID
 writeEdge db mid o = do
@@ -350,7 +350,7 @@ deleteEdge db oid = do
     writeTChan (dWrites db) (DeletedEdge oid)
 
 readProperty :: Database ->PropertyID -> STM (Property,PropertyValue)
-readProperty db oid = (fromMaybe def) <$> (SM.lookup oid $ gdProperties $ dData db)
+readProperty db oid = fromMaybe def <$> SM.lookup oid (gdProperties $ dData db)
 
 writeProperty :: Database -> Maybe PropertyID -> ((PropertyTypeID,PropertyID),PropertyValue) -> STM PropertyID
 writeProperty db mid ((tid,next),v) = do
@@ -365,8 +365,8 @@ writeProperty db mid ((tid,next),v) = do
         getID (Just i) l = do
             mo <- SM.lookup i $ gdProperties $ dData db
             case  mo of
-                Just (pold,_) -> do
-                    if (pLength pold==l)
+                Just (pold,_) ->
+                    if pLength pold==l
                         then return (i,pOffset pold)
                         else do
                             freeID (pOffset pold) (pLength pold) (mdGenPropertyOffset $ dMetadata db)
@@ -379,7 +379,7 @@ writeProperty db mid ((tid,next),v) = do
             i <- nextID (mdGenPropertyID $ dMetadata db) 1
             off <- getOff l
             return (i,off)
-        getOff l = nextID (mdGenPropertyOffset $ dMetadata db) l
+        getOff = nextID (mdGenPropertyOffset $ dMetadata db)
 
 deleteProperty :: Database -> PropertyID -> STM ()
 deleteProperty db oid = do

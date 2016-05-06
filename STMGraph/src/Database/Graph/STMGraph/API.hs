@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveDataTypeable, OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings #-}
 module Database.Graph.STMGraph.API
   ( nbNodes
   , nbEdges
@@ -27,7 +27,7 @@ import qualified Data.Text as T
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.Aeson as A
 import Data.Typeable
-import qualified ListT as ListT
+import qualified ListT
 import qualified STMContainers.Map as SM
 import qualified Data.Set as S
 
@@ -166,7 +166,7 @@ getNamedProperties db fp mfns = readProp fp []
                 Nothing -> error $ "unknown property type:" <> show (pType p)
                 Just n -> readProp (pNext p) $
                     if isFiltered mfns n
-                        then (toNameValue (fst n,v):ls)
+                        then toNameValue (fst n,v):ls
                         else ls
       isFiltered Nothing _ = True
       isFiltered (Just fns) (n,_)=n  `elem` fns
