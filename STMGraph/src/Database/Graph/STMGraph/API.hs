@@ -1,6 +1,8 @@
 {-# LANGUAGE DeriveDataTypeable, OverloadedStrings #-}
 module Database.Graph.STMGraph.API
-  ( addNode
+  ( nbNodes
+  , nbEdges
+  , addNode
   , removeNode
   , addEdge
   , removeEdge
@@ -29,6 +31,12 @@ import qualified ListT as ListT
 import qualified STMContainers.Map as SM
 import qualified Data.Set as S
 
+nbNodes :: Database -> STM Int
+nbNodes db = ListT.fold (\c _->return (c+1)) 0 $ SM.stream (gdNodes $ dData db)
+
+nbEdges :: Database -> STM Int
+nbEdges db = ListT.fold (\c _->return (c+1)) 0 $ SM.stream (gdEdges $ dData db)
+
 toPropertyValue :: NameValue -> (T.Text,PropertyValue)
 toPropertyValue (TextP n v)=(n,PVText v)
 toPropertyValue (IntP n v)=(n,PVInteger v)
@@ -54,6 +62,7 @@ removeNode db nid = do
     deleteProperties db $ nFirstProperty n
     removeEdges CleanTo $ nFirstFrom n
     removeEdges CleanFrom $ nFirstTo n
+    deleteNode db nid
   where
     removeEdges rem eid
      | eid == def = return ()
@@ -106,6 +115,7 @@ removeEdge' db eid rem
           else fixChain fstId eToNext (\r -> r{eToNext = nextTo})
         return def
       else return nextTo
+    deleteEdge db eid
     return $ getCleaned rem pidF pidT
   where
     fixChain crid getNext setNext

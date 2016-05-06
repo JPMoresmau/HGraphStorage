@@ -36,8 +36,12 @@ spec :: Spec
 spec = do
   describe "Update operations" $ do
     withEmptyDB "creates nodes" $ \db->do
+        nnb0 <- atomically $ nbNodes db
+        nnb0 `shouldBe` 0
         oid1 <- atomically $ addNode db "type1" [nm "obj0",cnt 1]
         oid1 `shouldBe` 1
+        nnb0 <- atomically $ nbNodes db
+        nnb0 `shouldBe` 1
         o1 <- atomically $ readNode db oid1
         o1 `shouldBe` Node 1 def def 2
         (p1,pv1) <- atomically $ readProperty db 1
@@ -50,9 +54,17 @@ spec = do
         o2 <- atomically $ readNode db oid2
         o2 `shouldBe` Node 1 def def 4
     withEmptyDB "creates edges" $ \db->do
+        nnb0 <- atomically $ nbNodes db
+        nnb0 `shouldBe` 0
+        enb0 <- atomically $ nbEdges db
+        enb0 `shouldBe` 0
         oid1 <- atomically $ addNode db "type1" [nm "obj1",cnt 1]
         oid2 <- atomically $ addNode db "type1" [nm "obj2",cnt 1]
         eid1 <- atomically $ addEdge db oid1 "ref1" [w 1] oid2
+        nnb1 <- atomically $ nbNodes db
+        nnb1 `shouldBe` 2
+        enb1 <- atomically $ nbEdges db
+        enb1 `shouldBe` 1
         eid1  `shouldBe` 1
         e1 <- atomically $ readEdge db eid1
         e1 `shouldBe` Edge oid1 1 oid2 1 1 def def 5
@@ -77,11 +89,21 @@ spec = do
         eid1 <- atomically $ addEdge db oid1 "ref1" [w 1] oid2
         eid2 <- atomically $ addEdge db oid1 "ref1" [w 1] oid3
         eid3 <- atomically $ addEdge db oid2 "ref1" [w 1] oid3
+        nnb0 <- atomically $ nbNodes db
+        nnb0 `shouldBe` 3
+        enb0 <- atomically $ nbEdges db
+        enb0 `shouldBe` 3
         atomically $ removeNode db oid1
+        o1 <- atomically $ readNode db oid1
+        o1 `shouldBe` def
         o2 <- atomically $ readNode db oid2
         o2 `shouldBe` Node 1 3 0 4
         o3 <- atomically $ readNode db oid3
         o3 `shouldBe` Node 1 0 3 6
+        nnb1 <- atomically $ nbNodes db
+        nnb1 `shouldBe` 2
+        enb1 <- atomically $ nbEdges db
+        enb1 `shouldBe` 1
     withEmptyDB "deletes edges" $ \db -> do
         oid1 <- atomically $ addNode db "type1" [nm "obj1",cnt 1]
         oid2 <- atomically $ addNode db "type1" [nm "obj2",cnt 1]
@@ -89,11 +111,21 @@ spec = do
         eid1 <- atomically $ addEdge db oid1 "ref1" [w 1] oid2
         eid2 <- atomically $ addEdge db oid1 "ref1" [w 1] oid3
         eid3 <- atomically $ addEdge db oid2 "ref1" [w 1] oid3
+        nnb0 <- atomically $ nbNodes db
+        nnb0 `shouldBe` 3
+        enb0 <- atomically $ nbEdges db
+        enb0 `shouldBe` 3
         e2 <- atomically $ readEdge db eid2
         e2 `shouldBe` Edge oid1 1 oid3 1 1 eid1 def 8
         e3 <- atomically $ readEdge db eid3
         e3 `shouldBe` Edge oid2 1 oid3 1 1 def eid2 9
         atomically $ removeEdge db eid1
+        e1 <- atomically $ readEdge db eid1
+        e1 `shouldBe` def
+        nnb1 <- atomically $ nbNodes db
+        nnb1 `shouldBe` 3
+        enb1 <- atomically $ nbEdges db
+        enb1 `shouldBe` 2
         o1 <- atomically $ readNode db oid1
         o1 `shouldBe` Node 1 2 def 2
         o2 <- atomically $ readNode db oid2
@@ -105,6 +137,10 @@ spec = do
         e3' <- atomically $ readEdge db eid3
         e3' `shouldBe` Edge oid2 1 oid3 1 1 def eid2 9
         atomically $ removeEdge db eid2
+        nnb2 <- atomically $ nbNodes db
+        nnb2 `shouldBe` 3
+        enb2 <- atomically $ nbEdges db
+        enb2 `shouldBe` 1
         o1' <- atomically $ readNode db oid1
         o1' `shouldBe` Node 1 def def 2
         e3'' <- atomically $ readEdge db eid3
