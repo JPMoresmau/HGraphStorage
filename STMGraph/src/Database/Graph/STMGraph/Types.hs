@@ -78,10 +78,10 @@ type PropertyValueLength = Int64
 -- | An Node as represented in the Node file
 data Node = Node
   {
-    nType          :: NodeTypeID -- ^ type of Node
-  , nFirstFrom     :: EdgeID   -- ^ first Edge starting from the Node
-  , nFirstTo       :: EdgeID   -- ^ first Edge arriving at the Node
-  , nFirstProperty :: PropertyID -- ^ first property
+    nType          :: {-# UNPACK #-} !NodeTypeID -- ^ type of Node
+  , nFirstFrom     :: {-# UNPACK #-} !EdgeID   -- ^ first Edge starting from the Node
+  , nFirstTo       :: {-# UNPACK #-} !EdgeID   -- ^ first Edge arriving at the Node
+  , nFirstProperty :: {-# UNPACK #-} !PropertyID -- ^ first property
   } deriving (Show,Read,Eq,Ord,Typeable,Generic)
 
 -- | Simple binary instance
@@ -117,14 +117,14 @@ binLength = BS.length . encode
 
 -- | A Edge as represented in the Edge file
 data Edge = Edge
-  { eFrom          :: NodeID  -- ^ origin Node
-  , eFromType      :: NodeTypeID -- ^ origin Node type
-  , eTo            :: NodeID -- ^ target Node
-  , eToType        :: NodeTypeID -- ^ target Node type
-  , eType          :: EdgeTypeID -- ^ type of the Edge
-  , eFromNext      :: EdgeID -- ^ next Edge of origin Node
-  , eToNext        :: EdgeID -- ^ next Edge of target Node
-  , eFirstProperty :: PropertyID -- ^ first property id
+  { eFrom          :: {-# UNPACK #-} !NodeID  -- ^ origin Node
+  , eFromType      :: {-# UNPACK #-} !NodeTypeID -- ^ origin Node type
+  , eTo            :: {-# UNPACK #-} !NodeID -- ^ target Node
+  , eToType        :: {-# UNPACK #-} !NodeTypeID -- ^ target Node type
+  , eType          :: {-# UNPACK #-} !EdgeTypeID -- ^ type of the Edge
+  , eFromNext      :: {-# UNPACK #-} !EdgeID -- ^ next Edge of origin Node
+  , eToNext        :: {-# UNPACK #-} !EdgeID -- ^ next Edge of target Node
+  , eFirstProperty :: {-# UNPACK #-} !PropertyID -- ^ first property id
   } deriving (Show,Read,Eq,Ord,Typeable,Generic)
 
 -- | simple binary instance
@@ -160,10 +160,10 @@ edgeSize =  binLength (def::Edge)
 
 -- | A property as represented in the property file
 data Property = Property
-  { pType   :: PropertyTypeID -- ^ type of the property
-  , pNext   :: PropertyID -- ^ next property id
-  , pOffset :: PropertyValueOffset -- ^ offset of the value
-  , pLength :: PropertyValueLength -- ^ length of the value
+  { pType   :: {-# UNPACK #-} !PropertyTypeID -- ^ type of the property
+  , pNext   :: {-# UNPACK #-} !PropertyID -- ^ next property id
+  , pOffset :: {-# UNPACK #-} !PropertyValueOffset -- ^ offset of the value
+  , pLength :: {-# UNPACK #-} !PropertyValueLength -- ^ length of the value
   } deriving (Show,Read,Eq,Ord,Typeable,Generic)
 
 -- | simple binary instance
