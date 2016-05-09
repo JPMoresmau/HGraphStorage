@@ -145,6 +145,22 @@ spec = do
         o1' `shouldBe` Node 1 def def 2
         e3'' <- atomically $ readEdge db eid3
         e3'' `shouldBe` Edge oid2 1 oid3 1 1 def def 9
+    withEmptyDB "updates properties" $ \db -> do
+        oid1 <- atomically $ addNode db "type1" [nm "obj0",cnt 1]
+        oid2 <- atomically $ addNode db "type1" [nm "obj2",cnt 2]
+        eid1 <- atomically $ addEdge db oid1 "ref1" [w 1] oid2
+        p1 <- atomically $ nodeProperties db oid1 return
+        p1 `shouldBe` [nm "obj0",cnt 1]
+        p2 <- atomically $ nodeProperties db oid1 (\ps->return ((s 3) : ps))
+        p2 `shouldBe` [s 3,nm "obj0",cnt 1]
+        p3 <- atomically $ nodeProperties db oid1 return
+        p3 `shouldBe` p2
+        p4 <- atomically $ edgeProperties db eid1 return
+        p4 `shouldBe` [w 1]
+        p5 <- atomically $ edgeProperties db eid1 (\ps->return $ (s 2) : ps)
+        p5 `shouldBe` [s 2,w 1]
+        p6 <- atomically $ edgeProperties db eid1 return
+        p6 `shouldBe` p5
   describe "Node Traversals" $ do
     withEmptyDB "finds node by id" $ \db->do
         oid1 <- atomically $ addNode db "type1" [nm "obj0",cnt 1]

@@ -378,7 +378,7 @@ nextID IDGen{..} l = do
         go m ((i,il):rs) | l > il = go m rs
         go m ((i,il):_) | l < il = do
                     let m2=DM.delete i m
-                    let m3=DM.insert (il-l) (i+l) m2
+                    let m3=DM.insert (i+l) (il-l) m2
                     return (m3,i)
 
 freeID :: Int64 -> Int64 -> IDGen -> STM ()

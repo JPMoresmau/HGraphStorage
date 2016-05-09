@@ -58,6 +58,20 @@ spec = do
         atomically $ freeID i5 1 ig
         m <- atomically $ readTVar (freeIDs ig)
         DM.null m `shouldBe` True
+    it "generates ID correctly bulk" $ do
+        ig <- atomically $ newIDGen 1
+        i1 <- atomically $ nextID ig 1
+        i2 <- atomically $ nextID ig 1
+        i3 <- atomically $ nextID ig 1
+        i4 <- atomically $ nextID ig 1
+        atomically $ freeID i1 1 ig
+        atomically $ freeID i2 1 ig
+        i5 <- atomically $ nextID ig 1
+        i6 <- atomically $ nextID ig 1
+        i7 <- atomically $ nextID ig 1
+        i5 `shouldBe` 1
+        i6 `shouldBe` 2
+        i7 `shouldBe` 5
   describe "value operations" $ do
     it "serializes values correctly" $ property $
         \x -> (toValue (valueType x) (toBin x)) == x

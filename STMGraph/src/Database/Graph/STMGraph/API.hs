@@ -4,8 +4,10 @@ module Database.Graph.STMGraph.API
   , nbEdges
   , addNode
   , removeNode
+  , nodeProperties
   , addEdge
   , removeEdge
+  , edgeProperties
   , NameValue(..)
   , traverseGraph
   , Traversal(..)
@@ -68,6 +70,18 @@ removeNode db nid = do
      | eid == def = return ()
      | otherwise = removeEdges rem =<< removeEdge' db eid rem
 
+
+nodeProperties :: Database -> NodeID -> ([NameValue] -> STM [NameValue]) -> STM [NameValue]
+nodeProperties db nid upd = do
+    n <- readNode db nid
+    oldVals <- getNodeProperties db n
+    newVals <- upd oldVals
+    when (newVals /= oldVals) $ do
+        deleteProperties db $ nFirstProperty n
+        pid <- createProperties db newVals
+        void $ writeNode db (Just nid) (n{nFirstProperty=pid})
+    return newVals
+
 addEdge :: Database -> NodeID -> T.Text -> [NameValue] -> NodeID -> STM EdgeID
 addEdge db from tp props to = do
   fromN<-readNode db from
@@ -127,6 +141,17 @@ removeEdge' db eid rem
                 then void $ writeEdge db (Just crid) $ setNext rel
                 else fixChain nid getNext setNext
 
+edgeProperties :: Database -> EdgeID -> ([NameValue] -> STM [NameValue]) -> STM [NameValue]
+edgeProperties db eid upd = do
+    e <- readEdge db eid
+    oldVals <- getEdgeProperties db e
+    newVals <- upd oldVals
+    when (newVals /= oldVals) $ do
+        deleteProperties db $ eFirstProperty e
+        pid <- createProperties db newVals
+        void $ writeEdge db (Just eid) (e{eFirstProperty=pid})
+    return newVals
+
 createProperties :: Database -> [NameValue] -> STM PropertyID
 createProperties db = foldM createProperty def . map toPropertyValue
   where
@@ -161,6 +186,7 @@ getNamedProperties db fp mfns = readProp fp []
         | fid == def = return ls
         | otherwise = do
             (p,v) <- readProperty db fid
+            when (pNext p == fid) $ error "loop!"
             mn <- getPropertyType db (pType p)
             case mn of
                 Nothing -> error $ "unknown property type:" <> show (pType p)
