@@ -26,7 +26,7 @@ import qualified Data.Text as T
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.Aeson as A
 import Data.Typeable
-
+import qualified Data.Set as S
 
 data NameValue
     = TextP {name::T.Text,tValue:: T.Text}
@@ -68,7 +68,13 @@ data Traversal
   | Values [T.Text]
   | AllValues
   | Noop
+  | Out [T.Text]
+  | In [T.Text]
+  | Both [T.Text]
   deriving (Show,Read,Eq,Typeable)
+
+instance Default Traversal where
+    def = Noop
 
 instance Monoid Traversal where
   Noop `mappend` b = b
@@ -88,3 +94,27 @@ data Result
   | Error T.Text
   deriving (Show,Read,Eq,Typeable)
 
+instance Monoid Result where
+  Empty `mappend` b = b
+  a `mappend` Empty = a
+  Unknown `mappend` b = b
+  a `mappend` Unknown = a
+  Error e `mappend` b = Error e
+  a `mappend` Error e = Error e
+  AllNodes `mappend` AllNodes = AllNodes
+  AllNodes `mappend` (Nodes _) = AllNodes
+  Nodes a `mappend` Nodes b = Nodes (a `mappend` b)
+  AllEdges `mappend` AllEdges = AllEdges
+  AllEdges `mappend` (Edges _) = AllEdges
+  Edges a `mappend` Edges b = Edges (a `mappend` b)
+  Properties t1 i1 `mappend` Properties t2 i2 = Properties (ordNub $ t1 `mappend` t2) (i1 `mappend` i2)
+  a `mappend` b = error $ "unsupported mappend between " ++ show a ++ " and " ++ show b
+  mempty = Empty
+
+
+ordNub :: (Ord a) => [a] -> [a]
+ordNub = go S.empty
+   where
+       go _ []     = []
+       go s (x:xs) = if x `S.member` s then go s xs
+                                     else x : go (S.insert x s) xs

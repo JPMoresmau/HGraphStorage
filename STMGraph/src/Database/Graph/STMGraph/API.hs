@@ -257,6 +257,38 @@ doTraverse db (Edges es) (Has nv) = do
     return $ edgesIfAny fs
 doTraverse db t (Values vs) = readProperties db t (Just vs)
 doTraverse db t AllValues = readProperties db t Nothing
+doTraverse db AllNodes (Out eTypes)
+    | null eTypes = return Empty
+    | otherwise   = do
+        let st = SM.stream $ gdNodes $ dData db
+        es <- ListT.fold (\l (_,n)->do
+            es<-readOutEdges db (nFirstFrom n) eTypes
+            return $ es:l) [] st
+        edgesToNodes eTo db $ concat es
+doTraverse db (Nodes ns) (Out eTypes)
+    | null eTypes = return Empty
+    | otherwise   = do
+        es <- mapM (\(_,n)->readOutEdges db (nFirstFrom n) eTypes) ns
+        edgesToNodes eTo db $ concat es
+doTraverse db AllNodes (In eTypes)
+    | null eTypes = return Empty
+    | otherwise   = do
+        let st = SM.stream $ gdNodes $ dData db
+        es <- ListT.fold (\l (_,n)->do
+            es<-readInEdges db (nFirstTo n) eTypes
+            return $ es:l) [] st
+        edgesToNodes eFrom db $ concat es
+doTraverse db (Nodes ns) (In eTypes)
+    | null eTypes = return Empty
+    | otherwise   = do
+        es <- mapM (\(_,n)->readInEdges db (nFirstTo n) eTypes) ns
+        edgesToNodes eFrom db $ concat es
+doTraverse db r (Both eTypes)
+    | null eTypes = return Empty
+    | otherwise   = do
+        inEs <- doTraverse db r (In eTypes)
+        outEs <- doTraverse db r (Out eTypes)
+        return $ inEs <> outEs
 doTraverse _ r t = return $ Error $ "Traversal not handled: " <> T.pack (show t) <> " in state: " <> T.pack (show r)
 
 readProperties :: Database -> Result -> Maybe [T.Text] -> STM Result
@@ -276,6 +308,14 @@ readProperties db AllEdges mvs = do
       ) [] st
 readProperties db (Edges es) mvs =
     getPropNames mvs <$> mapM (\(eid,e)->addEdgeInfo db (eid,e) =<<getNamedProperties db (eFirstProperty e) mvs) es
+
+edgesToNodes :: (Edge -> NodeID) -> Database -> [(EdgeID,Edge)] -> STM Result
+edgesToNodes f db es =do
+    fs <- mapM (\(_,e)->do
+                let nid=f e
+                n <- readNode db nid
+                return (nid,n)) es
+    return $ nodesIfAny fs
 
 addNodeInfo :: Database -> (NodeID,Node) -> [NameValue] -> STM Info
 addNodeInfo db (nid,n) nvs = do
@@ -297,13 +337,6 @@ getPropNames :: Maybe [T.Text]  -> [Info] -> Result
 getPropNames (Just vs) nvs = Properties vs nvs
 getPropNames _ nvs = Properties (ordNub $ concatMap (map name . properties) nvs) nvs
 
-ordNub :: (Ord a) => [a] -> [a]
-ordNub = go S.empty
-   where
-       go _ []     = []
-       go s (x:xs) = if x `S.member` s then go s xs
-                                     else x : go (S.insert x s) xs
-
 nodesIfAny :: [(NodeID,Node)] -> Result
 nodesIfAny [] = Empty
 nodesIfAny ns = Nodes ns
@@ -311,3 +344,25 @@ nodesIfAny ns = Nodes ns
 edgesIfAny :: [(EdgeID,Edge)] -> Result
 edgesIfAny [] = Empty
 edgesIfAny es = Edges es
+
+readOutEdges :: Database -> EdgeID -> [T.Text] ->STM [(EdgeID,Edge)]
+readOutEdges = readEdges eFromNext
+
+readInEdges :: Database -> EdgeID -> [T.Text] ->STM [(EdgeID,Edge)]
+readInEdges = readEdges eToNext
+
+readEdges :: (Edge -> EdgeID) -> Database -> EdgeID -> [T.Text] ->STM [(EdgeID,Edge)]
+readEdges next db eid eTypes =go eid []
+    where
+         go eid' ls
+            | def == eid' = return ls
+            | otherwise = do
+            e <- readEdge db eid'
+            mt <- getEdgeType db (eType e)
+            case mt of
+                Nothing -> error $ "unknown edge type:" <> show (eType e)
+                Just t ->
+                    if "*" `elem` eTypes || t `elem` eTypes
+                        then go (next e) ((eid',e):ls)
+                        else go (next e) ls
+
