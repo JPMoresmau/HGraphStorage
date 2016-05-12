@@ -313,6 +313,8 @@ spec = do
         r1 `shouldBe` Nodes [oid2,oid3]
         r2 <- atomically $ traverseGraph db (Ns <> Out ["ref1","ref2"])
         r2 `shouldBe` Nodes [oid2,oid3]
+        r3 <- atomically $ traverseGraph db (Ns <> OutE ["ref1","ref2"])
+        r3 `shouldBe` Edges [eid1,oid2]
      withEmptyDB "all edge types" $ \db -> do
         oid1 <- atomically $ addNode db "type1" [nm "obj1",cnt 1]
         oid2 <- atomically $ addNode db "type1" [nm "obj2",cnt 1]
@@ -344,6 +346,8 @@ spec = do
         r1 `shouldBe` Nodes [oid2,oid3]
         r2 <- atomically $ traverseGraph db (Ns <> In ["ref1","ref2"])
         r2 `shouldBe` Nodes [oid2,oid3]
+        r3 <- atomically $ traverseGraph db (Ns <> InE ["ref1","ref2"])
+        r3 `shouldBe` Edges [eid1,eid2]
      withEmptyDB "all edge types" $ \db -> do
         oid1 <- atomically $ addNode db "type1" [nm "obj1",cnt 1]
         oid2 <- atomically $ addNode db "type1" [nm "obj2",cnt 1]
@@ -375,6 +379,8 @@ spec = do
         r1 `shouldBe` Nodes [oid2,oid3]
         r2 <- atomically $ traverseGraph db (Ns <> Both ["ref1","ref2"])
         r2 `shouldBe` Nodes [oid1,oid2,oid1,oid3]
+        r3 <- atomically $ traverseGraph db (Ns <> BothE ["ref1","ref2"])
+        r3 `shouldBe` Edges [eid2,eid1,eid1,eid2]
 
 nm :: T.Text -> NameValue
 nm = TextP "nm"

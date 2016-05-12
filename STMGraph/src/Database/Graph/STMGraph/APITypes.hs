@@ -71,6 +71,9 @@ data Traversal
   | Out [T.Text]
   | In [T.Text]
   | Both [T.Text]
+  | OutE [T.Text]
+  | InE [T.Text]
+  | BothE [T.Text]
   deriving (Show,Read,Eq,Typeable)
 
 instance Default Traversal where

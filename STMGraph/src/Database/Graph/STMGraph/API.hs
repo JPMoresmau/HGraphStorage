@@ -258,37 +258,53 @@ doTraverse db (SEdges es) (Has nv) = do
     return $ edgesIfAny fs
 doTraverse db t (Values vs) = readProperties db t (Just vs)
 doTraverse db t AllValues = readProperties db t Nothing
-doTraverse db SAllNodes (Out eTypes)
+doTraverse db s (Out eTypes)
+    | null eTypes = return SEmpty
+    | otherwise   = do
+        es <- doTraverse db s (OutE eTypes)
+        edgesToNodes eTo db es
+doTraverse db s (In eTypes)
+    | null eTypes = return SEmpty
+    | otherwise   = do
+        es <- doTraverse db s (InE eTypes)
+        edgesToNodes eFrom db es
+doTraverse db r (Both eTypes)
+    | null eTypes = return SEmpty
+    | otherwise   = do
+        inEs <- doTraverse db r (In eTypes)
+        outEs <- doTraverse db r (Out eTypes)
+        return $ inEs <> outEs
+doTraverse db SAllNodes (OutE eTypes)
     | null eTypes = return SEmpty
     | otherwise   = do
         let st = SM.stream $ gdNodes $ dData db
         es <- ListT.fold (\l (_,n)->do
             es<-readOutEdges db (nFirstFrom n) eTypes
             return $ es:l) [] st
-        edgesToNodes eTo db $ concat es
-doTraverse db (SNodes ns) (Out eTypes)
+        return $ SEdges $ concat es
+doTraverse db (SNodes ns) (OutE eTypes)
     | null eTypes = return SEmpty
     | otherwise   = do
         es <- mapM (\(_,n)->readOutEdges db (nFirstFrom n) eTypes) ns
-        edgesToNodes eTo db $ concat es
-doTraverse db SAllNodes (In eTypes)
+        return $ SEdges $ concat es
+doTraverse db SAllNodes (InE eTypes)
     | null eTypes = return SEmpty
     | otherwise   = do
         let st = SM.stream $ gdNodes $ dData db
         es <- ListT.fold (\l (_,n)->do
             es<-readInEdges db (nFirstTo n) eTypes
             return $ es:l) [] st
-        edgesToNodes eFrom db $ concat es
-doTraverse db (SNodes ns) (In eTypes)
+        return $ SEdges $ concat es
+doTraverse db (SNodes ns) (InE eTypes)
     | null eTypes = return SEmpty
     | otherwise   = do
         es <- mapM (\(_,n)->readInEdges db (nFirstTo n) eTypes) ns
-        edgesToNodes eFrom db $ concat es
-doTraverse db r (Both eTypes)
+        return $ SEdges $ concat es
+doTraverse db r (BothE eTypes)
     | null eTypes = return SEmpty
     | otherwise   = do
-        inEs <- doTraverse db r (In eTypes)
-        outEs <- doTraverse db r (Out eTypes)
+        inEs <- doTraverse db r (InE eTypes)
+        outEs <- doTraverse db r (OutE eTypes)
         return $ inEs <> outEs
 doTraverse _ r t = return $ SError $ "Traversal not handled: " <> T.pack (show t) <> " in state: " <> T.pack (show r)
 
@@ -310,19 +326,20 @@ readProperties db SAllEdges mvs = do
 readProperties db (SEdges es) mvs =
     getPropNames mvs <$> mapM (\(eid,e)->addEdgeInfo db (eid,e) =<<getNamedProperties db (eFirstProperty e) mvs) es
 
-edgesToNodes :: (Edge -> NodeID) -> Database -> [(EdgeID,Edge)] -> STM State
-edgesToNodes f db es =do
+edgesToNodes :: (Edge -> NodeID) -> Database -> State -> STM State
+edgesToNodes f db (SEdges es) =do
     fs <- mapM (\(_,e)->do
                 let nid=f e
                 n <- readNode db nid
                 return (nid,n)) es
     return $ nodesIfAny fs
+edgesToNodes _ _ s = error $ "edgesToNodes: Unexpected state:" <> show s
 
 addNodeInfo :: Database -> (NodeID,Node) -> [NameValue] -> STM Info
 addNodeInfo db (nid,n) nvs = do
     mt <- getNodeType db (nType n)
     case mt of
-        Nothing -> error $ "unknown node type:" <> show (nType n)
+        Nothing -> error $ "addNodeInfo: unknown node type:" <> show (nType n)
         Just t -> return $ NodeInfo nid t nvs
 
 
@@ -330,7 +347,7 @@ addEdgeInfo :: Database -> (EdgeID,Edge) -> [NameValue] -> STM Info
 addEdgeInfo db (eid,e) nvs = do
     mt <- getEdgeType db (eType e)
     case mt of
-        Nothing -> error $ "unknown edge type:" <> show (eType e)
+        Nothing -> error $ "addEdgeInfo: unknown edge type:" <> show (eType e)
         Just t -> return $ EdgeInfo eid t nvs
 
 
