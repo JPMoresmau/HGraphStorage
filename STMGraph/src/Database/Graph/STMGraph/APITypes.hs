@@ -83,11 +83,39 @@ instance Monoid Traversal where
   mempty = Noop
   mconcat = Composed
 
+data State
+  = SAllNodes
+  | SNodes [(NodeID,Node)]
+  | SAllEdges
+  | SEdges [(EdgeID,Edge)]
+  | SProperties [T.Text] [Info]
+  | SUnknown
+  | SEmpty
+  | SError T.Text
+  deriving (Show,Read,Eq,Typeable)
+
+instance Monoid State where
+  SEmpty `mappend` b = b
+  a `mappend` SEmpty = a
+  SUnknown `mappend` b = b
+  a `mappend` SUnknown = a
+  SError e `mappend` b = SError e
+  a `mappend` SError e = SError e
+  SAllNodes `mappend` SAllNodes = SAllNodes
+  SAllNodes `mappend` (SNodes _) = SAllNodes
+  SNodes a `mappend` SNodes b = SNodes (a `mappend` b)
+  SAllEdges `mappend` SAllEdges = SAllEdges
+  SAllEdges `mappend` (SEdges _) = SAllEdges
+  SEdges a `mappend` SEdges b = SEdges (a `mappend` b)
+  SProperties t1 i1 `mappend` SProperties t2 i2 = SProperties (ordNub $ t1 `mappend` t2) (i1 `mappend` i2)
+  a `mappend` b = SError $ T.pack $ "Unsupported State mappend between " ++ show a ++ " and " ++ show b
+  mempty = SEmpty
+
 data Result
   = AllNodes
-  | Nodes [(NodeID,Node)]
+  | Nodes [NodeID]
   | AllEdges
-  | Edges [(EdgeID,Edge)]
+  | Edges [EdgeID]
   | Properties [T.Text] [Info]
   | Unknown
   | Empty
@@ -108,9 +136,18 @@ instance Monoid Result where
   AllEdges `mappend` (Edges _) = AllEdges
   Edges a `mappend` Edges b = Edges (a `mappend` b)
   Properties t1 i1 `mappend` Properties t2 i2 = Properties (ordNub $ t1 `mappend` t2) (i1 `mappend` i2)
-  a `mappend` b = error $ "unsupported mappend between " ++ show a ++ " and " ++ show b
+  a `mappend` b = Error $ T.pack $ "Unsupported mappend between " ++ show a ++ " and " ++ show b
   mempty = Empty
 
+stateToResult :: State -> Result
+stateToResult SAllNodes = AllNodes
+stateToResult (SNodes ns) = Nodes $ map fst ns
+stateToResult SAllEdges = AllEdges
+stateToResult (SEdges es) = Edges $ map fst es
+stateToResult (SProperties t is) = Properties t is
+stateToResult SUnknown = Unknown
+stateToResult (SError e) = Error e
+stateToResult SEmpty = Empty
 
 ordNub :: (Ord a) => [a] -> [a]
 ordNub = go S.empty

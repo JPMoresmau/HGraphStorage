@@ -165,7 +165,7 @@ spec = do
     withEmptyDB "finds node by id" $ \db->do
         oid1 <- atomically $ addNode db "type1" [nm "obj0",cnt 1]
         r <- atomically $ traverseGraph db (Ns <> NID  [1])
-        r `shouldBe` Nodes [(oid1,Node 1 def def 2)]
+        r `shouldBe` Nodes [oid1]
     withEmptyDB "doesn't find unexisting node by id" $ \db->do
         r <- atomically $ traverseGraph db (Ns <> NID  [1])
         r `shouldBe` Empty
@@ -173,12 +173,12 @@ spec = do
         oid1 <- atomically $ addNode db "type1" [nm "obj1",cnt 1]
         oid2 <- atomically $ addNode db "type1" [nm "obj2",cnt 1]
         r <- atomically $ traverseGraph db (Ns <> NID  [1,2] <> Has (nm "obj1"))
-        r `shouldBe` Nodes [(oid1,Node 1 def def 2)]
+        r `shouldBe` Nodes [oid1]
     withEmptyDB "finds node by value" $ \db->do
         oid1 <- atomically $ addNode db "type1" [nm "obj1",cnt 1]
         oid2 <- atomically $ addNode db "type1" [nm "obj2",cnt 1]
         r <- atomically $ traverseGraph db (Ns <> Has (nm "obj1"))
-        r `shouldBe` Nodes [(oid1,Node 1 def def 2)]
+        r `shouldBe` Nodes [oid1]
     withEmptyDB "doesn't find node by id and unknown value" $ \db->do
         oid1 <- atomically $ addNode db "type1" [nm "obj1",cnt 1]
         oid2 <- atomically $ addNode db "type1" [nm "obj2",cnt 1]
@@ -195,7 +195,7 @@ spec = do
         oid2 <- atomically $ addNode db "type1" [nm "obj2",cnt 1]
         eid1 <- atomically $ addEdge db oid1 "ref1" [w 1] oid2
         r <- atomically $ traverseGraph db (Es <> EID  [1])
-        r `shouldBe` Edges [(eid1,Edge oid1 1 oid2 1 1 def def 5)]
+        r `shouldBe` Edges [eid1]
     withEmptyDB "doesn't find unexisting edge by id" $ \db->do
         r <- atomically $ traverseGraph db (Es <> EID  [1])
         r `shouldBe` Empty
@@ -205,14 +205,14 @@ spec = do
         eid1 <- atomically $ addEdge db oid1 "ref1" [w 1] oid2
         eid2 <- atomically $ addEdge db oid1 "ref2" [w 2] oid2
         r <- atomically $ traverseGraph db (Es <> EID  [1,2] <> Has (w 1))
-        r `shouldBe` Edges [(oid1,Edge oid1 1 oid2 1 1 def def 5)]
+        r `shouldBe` Edges [oid1]
     withEmptyDB "finds edge by value" $ \db->do
         oid1 <- atomically $ addNode db "type1" [nm "obj1",cnt 1]
         oid2 <- atomically $ addNode db "type1" [nm "obj2",cnt 1]
         eid1 <- atomically $ addEdge db oid1 "ref1" [w 1] oid2
         eid2 <- atomically $ addEdge db oid1 "ref2" [w 2] oid2
         r <- atomically $ traverseGraph db (Es <> Has (w 1))
-        r `shouldBe` Edges [(oid1,Edge oid1 1 oid2 1 1 def def 5)]
+        r `shouldBe` Edges [oid1]
     withEmptyDB "doesn't find edge by id and unknown value" $ \db->do
         oid1 <- atomically $ addNode db "type1" [nm "obj1",cnt 1]
         oid2 <- atomically $ addNode db "type1" [nm "obj2",cnt 1]
@@ -308,11 +308,11 @@ spec = do
         eid1 <- atomically $ addEdge db oid1 "ref1" [w 1] oid2
         eid2 <- atomically $ addEdge db oid1 "ref2" [w 2,s 0] oid3
         r0 <- atomically $ traverseGraph db (Ns <> NID  [1] <> Out ["ref1"])
-        r0 `shouldBe` Nodes [(oid2,Node 1 def 1 4)]
+        r0 `shouldBe` Nodes [oid2]
         r1 <- atomically $ traverseGraph db (Ns <> NID  [1] <> Out ["ref1","ref2"])
-        r1 `shouldBe` Nodes [(oid2,Node 1 def 1 4),(oid3,Node 1 def 2 6)]
+        r1 `shouldBe` Nodes [oid2,oid3]
         r2 <- atomically $ traverseGraph db (Ns <> Out ["ref1","ref2"])
-        r2 `shouldBe` Nodes [(oid2,Node 1 def 1 4),(oid3,Node 1 def 2 6)]
+        r2 `shouldBe` Nodes [oid2,oid3]
      withEmptyDB "all edge types" $ \db -> do
         oid1 <- atomically $ addNode db "type1" [nm "obj1",cnt 1]
         oid2 <- atomically $ addNode db "type1" [nm "obj2",cnt 1]
@@ -320,7 +320,7 @@ spec = do
         eid1 <- atomically $ addEdge db oid1 "ref1" [w 1] oid2
         eid2 <- atomically $ addEdge db oid1 "ref2" [w 2,s 0] oid3
         r0 <- atomically $ traverseGraph db (Ns <> NID  [1] <> Out ["*"])
-        r0 `shouldBe` Nodes [(oid2,Node 1 def 1 4),(oid3,Node 1 def 2 6)]
+        r0 `shouldBe` Nodes [oid2,oid3]
      withEmptyDB "unknown edge types" $ \db -> do
         oid1 <- atomically $ addNode db "type1" [nm "obj1",cnt 1]
         oid2 <- atomically $ addNode db "type1" [nm "obj2",cnt 1]
@@ -330,7 +330,7 @@ spec = do
         r0 <- atomically $ traverseGraph db (Ns <> NID  [1] <> Out ["ref3","ref4"])
         r0 `shouldBe` Empty
         r1 <- atomically $ traverseGraph db (Ns <> NID  [1] <> Out ["ref1","ref3"])
-        r1 `shouldBe` Nodes [(oid2,Node 1 def 1 4)]
+        r1 `shouldBe` Nodes [oid2]
   describe "In edges" $ do
      withEmptyDB "specific edge types" $ \db -> do
         oid1 <- atomically $ addNode db "type1" [nm "obj1",cnt 1]
@@ -339,11 +339,11 @@ spec = do
         eid1 <- atomically $ addEdge db oid2 "ref1" [w 1] oid1
         eid2 <- atomically $ addEdge db oid3 "ref2" [w 2,s 0] oid1
         r0 <- atomically $ traverseGraph db (Ns <> NID  [1] <> In ["ref1"])
-        r0 `shouldBe` Nodes [(oid2,Node 1 1 def 4)]
+        r0 `shouldBe` Nodes [oid2]
         r1 <- atomically $ traverseGraph db (Ns <> NID  [1] <> In ["ref1","ref2"])
-        r1 `shouldBe` Nodes [(oid2,Node 1 1 def 4),(oid3,Node 1 2 def 6)]
+        r1 `shouldBe` Nodes [oid2,oid3]
         r2 <- atomically $ traverseGraph db (Ns <> In ["ref1","ref2"])
-        r2 `shouldBe` Nodes [(oid2,Node 1 1 def 4),(oid3,Node 1 2 def 6)]
+        r2 `shouldBe` Nodes [oid2,oid3]
      withEmptyDB "all edge types" $ \db -> do
         oid1 <- atomically $ addNode db "type1" [nm "obj1",cnt 1]
         oid2 <- atomically $ addNode db "type1" [nm "obj2",cnt 1]
@@ -351,7 +351,7 @@ spec = do
         eid1 <- atomically $ addEdge db oid2 "ref1" [w 1] oid1
         eid2 <- atomically $ addEdge db oid3 "ref2" [w 2,s 0] oid1
         r0 <- atomically $ traverseGraph db (Ns <> NID  [1] <> In ["*"])
-        r0 `shouldBe` Nodes [(oid2,Node 1 1 def 4),(oid3,Node 1 2 def 6)]
+        r0 `shouldBe` Nodes [oid2,oid3]
      withEmptyDB "unknown edge types" $ \db -> do
         oid1 <- atomically $ addNode db "type1" [nm "obj1",cnt 1]
         oid2 <- atomically $ addNode db "type1" [nm "obj2",cnt 1]
@@ -361,7 +361,7 @@ spec = do
         r0 <- atomically $ traverseGraph db (Ns <> NID  [1] <> In ["ref3","ref4"])
         r0 `shouldBe` Empty
         r1 <- atomically $ traverseGraph db (Ns <> NID  [1] <> In ["ref1","ref3"])
-        r1 `shouldBe` Nodes [(oid2,Node 1 1 def 4)]
+        r1 `shouldBe` Nodes [oid2]
   describe "Both edges" $ do
      withEmptyDB "specific edge types" $ \db -> do
         oid1 <- atomically $ addNode db "type1" [nm "obj1",cnt 1]
@@ -370,11 +370,11 @@ spec = do
         eid1 <- atomically $ addEdge db oid2 "ref1" [w 1] oid1
         eid2 <- atomically $ addEdge db oid1 "ref2" [w 2,s 0] oid3
         r0 <- atomically $ traverseGraph db (Ns <> NID  [1] <> Both ["ref1"])
-        r0 `shouldBe` Nodes [(oid2,Node 1 1 def 4)]
+        r0 `shouldBe` Nodes [oid2]
         r1 <- atomically $ traverseGraph db (Ns <> NID  [1] <> Both ["ref1","ref2"])
-        r1 `shouldBe` Nodes [(oid2,Node 1 1 def 4),(oid3,Node 1 def 2 6)]
+        r1 `shouldBe` Nodes [oid2,oid3]
         r2 <- atomically $ traverseGraph db (Ns <> Both ["ref1","ref2"])
-        r2 `shouldBe` Nodes [(oid1,Node 1 2 1 2),(oid2,Node 1 1 def 4),(oid1,Node 1 2 1 2),(oid3,Node 1 def 2 6)]
+        r2 `shouldBe` Nodes [oid1,oid2,oid1,oid3]
 
 nm :: T.Text -> NameValue
 nm = TextP "nm"

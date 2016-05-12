@@ -209,107 +209,108 @@ edgeHasNamedValue db e nv = do
   return $ nv `elem` nvs
 
 traverseGraph :: Database -> Traversal -> STM Result
-traverseGraph db = doTraverse db Unknown
+traverseGraph db t = stateToResult <$> doTraverse db SUnknown t
 
-doTraverse :: Database -> Result -> Traversal -> STM Result
-doTraverse db Empty _ = return Empty
+
+doTraverse :: Database -> State -> Traversal -> STM State
+doTraverse db SEmpty _ = return SEmpty
 doTraverse db r Noop = return r
 doTraverse db st (Composed ts) = foldM (doTraverse db) st ts
-doTraverse db _ Ns = return AllNodes
-doTraverse db _ Es = return AllEdges
-doTraverse db AllNodes (NID nids) = do
+doTraverse db _ Ns = return SAllNodes
+doTraverse db _ Es = return SAllEdges
+doTraverse db SAllNodes (NID nids) = do
     ns <- filter (\(_,n)-> n/= def) <$> mapM (\nid ->
         do
             n<-readNode db nid
             return (nid,n)) nids
     return $ nodesIfAny ns
-doTraverse db (Nodes ns) (NID nids) =  do
+doTraverse db (SNodes ns) (NID nids) =  do
     let fs = filter (\(nid,_)->nid `elem` nids) ns
     return $ nodesIfAny fs
-doTraverse db _ (NID _) = return Empty
-doTraverse db AllEdges (EID eids) = do
+doTraverse db _ (NID _) = return SEmpty
+doTraverse db SAllEdges (EID eids) = do
     ns <- filter (\(_,e)-> e/= def) <$> mapM (\eid ->
         do
             e<-readEdge db eid
             return (eid,e)) eids
     return $ edgesIfAny ns
-doTraverse db (Edges es) (EID eids) =  do
+doTraverse db (SEdges es) (EID eids) =  do
     let fs = filter (\(eid,_)->eid `elem` eids) es
     return $ edgesIfAny fs
-doTraverse db _ (EID _) = return Empty
-doTraverse db AllNodes (Has nv) = do
+doTraverse db _ (EID _) = return SEmpty
+doTraverse db SAllNodes (Has nv) = do
   let st = SM.stream $ gdNodes $ dData db
   fs <- ListT.fold (\l (nid,n)->do
     has <- nodeHasNamedValue db n nv
     return $ if has then (nid,n):l else l) [] st
   return $ nodesIfAny fs
-doTraverse db (Nodes ns) (Has nv) = do
+doTraverse db (SNodes ns) (Has nv) = do
     fs <- filterM (\(_,n)->nodeHasNamedValue db n nv) ns
     return $ nodesIfAny fs
-doTraverse db AllEdges (Has nv) = do
+doTraverse db SAllEdges (Has nv) = do
   let st = SM.stream $ gdEdges $ dData db
   fs <- ListT.fold (\l (eid,e)->do
     has <- edgeHasNamedValue db e nv
     return $ if has then (eid,e):l else l) [] st
   return $ edgesIfAny fs
-doTraverse db (Edges es) (Has nv) = do
+doTraverse db (SEdges es) (Has nv) = do
     fs <- filterM (\(_,e)->edgeHasNamedValue db e nv) es
     return $ edgesIfAny fs
 doTraverse db t (Values vs) = readProperties db t (Just vs)
 doTraverse db t AllValues = readProperties db t Nothing
-doTraverse db AllNodes (Out eTypes)
-    | null eTypes = return Empty
+doTraverse db SAllNodes (Out eTypes)
+    | null eTypes = return SEmpty
     | otherwise   = do
         let st = SM.stream $ gdNodes $ dData db
         es <- ListT.fold (\l (_,n)->do
             es<-readOutEdges db (nFirstFrom n) eTypes
             return $ es:l) [] st
         edgesToNodes eTo db $ concat es
-doTraverse db (Nodes ns) (Out eTypes)
-    | null eTypes = return Empty
+doTraverse db (SNodes ns) (Out eTypes)
+    | null eTypes = return SEmpty
     | otherwise   = do
         es <- mapM (\(_,n)->readOutEdges db (nFirstFrom n) eTypes) ns
         edgesToNodes eTo db $ concat es
-doTraverse db AllNodes (In eTypes)
-    | null eTypes = return Empty
+doTraverse db SAllNodes (In eTypes)
+    | null eTypes = return SEmpty
     | otherwise   = do
         let st = SM.stream $ gdNodes $ dData db
         es <- ListT.fold (\l (_,n)->do
             es<-readInEdges db (nFirstTo n) eTypes
             return $ es:l) [] st
         edgesToNodes eFrom db $ concat es
-doTraverse db (Nodes ns) (In eTypes)
-    | null eTypes = return Empty
+doTraverse db (SNodes ns) (In eTypes)
+    | null eTypes = return SEmpty
     | otherwise   = do
         es <- mapM (\(_,n)->readInEdges db (nFirstTo n) eTypes) ns
         edgesToNodes eFrom db $ concat es
 doTraverse db r (Both eTypes)
-    | null eTypes = return Empty
+    | null eTypes = return SEmpty
     | otherwise   = do
         inEs <- doTraverse db r (In eTypes)
         outEs <- doTraverse db r (Out eTypes)
         return $ inEs <> outEs
-doTraverse _ r t = return $ Error $ "Traversal not handled: " <> T.pack (show t) <> " in state: " <> T.pack (show r)
+doTraverse _ r t = return $ SError $ "Traversal not handled: " <> T.pack (show t) <> " in state: " <> T.pack (show r)
 
-readProperties :: Database -> Result -> Maybe [T.Text] -> STM Result
-readProperties db AllNodes mvs = do
+readProperties :: Database -> State -> Maybe [T.Text] -> STM State
+readProperties db SAllNodes mvs = do
     let st = SM.stream $ gdNodes $ dData db
     getPropNames mvs <$> ListT.fold (\l (nid,n)-> do
       ps<-addNodeInfo db (nid,n) =<< getNamedProperties db (nFirstProperty n) mvs
       return (ps:l)
       ) [] st
-readProperties db (Nodes ns) mvs =
+readProperties db (SNodes ns) mvs =
     getPropNames mvs <$> mapM (\(nid,n)->addNodeInfo db (nid,n) =<< getNamedProperties db (nFirstProperty n) mvs) ns
-readProperties db AllEdges mvs = do
+readProperties db SAllEdges mvs = do
     let st = SM.stream $ gdEdges $ dData db
     getPropNames mvs <$> ListT.fold (\l (eid,e)-> do
       ps<-addEdgeInfo db (eid,e) =<< getNamedProperties db (eFirstProperty e) mvs
       return (ps:l)
       ) [] st
-readProperties db (Edges es) mvs =
+readProperties db (SEdges es) mvs =
     getPropNames mvs <$> mapM (\(eid,e)->addEdgeInfo db (eid,e) =<<getNamedProperties db (eFirstProperty e) mvs) es
 
-edgesToNodes :: (Edge -> NodeID) -> Database -> [(EdgeID,Edge)] -> STM Result
+edgesToNodes :: (Edge -> NodeID) -> Database -> [(EdgeID,Edge)] -> STM State
 edgesToNodes f db es =do
     fs <- mapM (\(_,e)->do
                 let nid=f e
@@ -333,17 +334,17 @@ addEdgeInfo db (eid,e) nvs = do
         Just t -> return $ EdgeInfo eid t nvs
 
 
-getPropNames :: Maybe [T.Text]  -> [Info] -> Result
-getPropNames (Just vs) nvs = Properties vs nvs
-getPropNames _ nvs = Properties (ordNub $ concatMap (map name . properties) nvs) nvs
+getPropNames :: Maybe [T.Text]  -> [Info] -> State
+getPropNames (Just vs) nvs = SProperties vs nvs
+getPropNames _ nvs = SProperties (ordNub $ concatMap (map name . properties) nvs) nvs
 
-nodesIfAny :: [(NodeID,Node)] -> Result
-nodesIfAny [] = Empty
-nodesIfAny ns = Nodes ns
+nodesIfAny :: [(NodeID,Node)] -> State
+nodesIfAny [] = SEmpty
+nodesIfAny ns = SNodes ns
 
-edgesIfAny :: [(EdgeID,Edge)] -> Result
-edgesIfAny [] = Empty
-edgesIfAny es = Edges es
+edgesIfAny :: [(EdgeID,Edge)] -> State
+edgesIfAny [] = SEmpty
+edgesIfAny es = SEdges es
 
 readOutEdges :: Database -> EdgeID -> [T.Text] ->STM [(EdgeID,Edge)]
 readOutEdges = readEdges eFromNext
