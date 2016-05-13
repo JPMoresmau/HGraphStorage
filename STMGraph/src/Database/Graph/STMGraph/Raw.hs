@@ -53,7 +53,7 @@ import Control.Concurrent
 import Control.Concurrent.STM.TVar
 import Control.Monad
 import Control.Monad.STM
-import Control.Concurrent.STM.TChan
+import Control.Concurrent.STM.TQueue
 import qualified STMContainers.Map as SM
 import qualified Data.Map                               as DM
 import qualified Data.Text as T
@@ -96,13 +96,13 @@ open dir gs = do
 
 close :: Database -> IO ()
 close Database{..} = do
-    atomically $ writeTChan dWrites ClosedDatabase
+    atomically $ writeTQueue dWrites ClosedDatabase
     takeMVar dWriterThread
 
 checkpoint :: Database -> IO ()
 checkpoint Database{..} = do
     mv <- newEmptyMVar
-    atomically $ writeTChan dWrites (Checkpoint mv)
+    atomically $ writeTQueue dWrites (Checkpoint mv)
     takeMVar mv
 
 
@@ -209,9 +209,9 @@ foldAllGeneric h (ptr,sz) f1 f2 = do
                          else f1 (i,b)
                 go i
 
-writer :: Handles -> TChan WriteEvent  -> Ptrs -> IO ()
+writer :: Handles -> TQueue WriteEvent  -> Ptrs -> IO ()
 writer hs@Handles{..} tc ptrs@Ptrs{..} = do
-    e <- atomically $ readTChan tc
+    e <- atomically $ readTQueue tc
     handle e
     unless (e == ClosedDatabase) $ writer hs tc ptrs
     where
@@ -273,7 +273,7 @@ updateModel upd db = do
     let mdl2 = upd mdl
     when (mdl2 /= mdl) $ do
       writeTVar tv $! mdl2
-      writeTChan (dWrites db) (WrittenModel mdl2)
+      writeTQueue (dWrites db) (WrittenModel mdl2)
 
 getModel :: Database -> STM Model
 getModel db = readTVar $ mdModel $ dMetadata db
@@ -360,7 +360,7 @@ writeNode :: Database -> Maybe NodeID -> Node -> STM NodeID
 writeNode db mid o = do
         i <- getID mid
         SM.insert o i $ gdNodes $ dData db
-        writeTChan (dWrites db) (WrittenNode i o)
+        writeTQueue (dWrites db) (WrittenNode i o)
         return i
     where
         getID (Just i)= return i
@@ -370,7 +370,7 @@ deleteNode :: Database -> NodeID -> STM ()
 deleteNode db oid = do
     freeID oid 1 (mdGenNodeID $ dMetadata db)
     SM.delete oid $ gdNodes $ dData db
-    writeTChan (dWrites db) (DeletedNode oid)
+    writeTQueue (dWrites db) (DeletedNode oid)
 
 
 readEdge :: Database ->EdgeID -> STM Edge
@@ -380,7 +380,7 @@ writeEdge :: Database -> Maybe EdgeID -> Edge -> STM EdgeID
 writeEdge db mid o = do
         i <- getID mid
         SM.insert o i $ gdEdges $ dData db
-        writeTChan (dWrites db) (WrittenEdge i o)
+        writeTQueue (dWrites db) (WrittenEdge i o)
         return i
     where
         getID (Just i)= return i
@@ -390,7 +390,7 @@ deleteEdge :: Database -> EdgeID -> STM ()
 deleteEdge db oid = do
     freeID oid 1 (mdGenEdgeID $ dMetadata db)
     SM.delete oid $ gdEdges $ dData db
-    writeTChan (dWrites db) (DeletedEdge oid)
+    writeTQueue (dWrites db) (DeletedEdge oid)
 
 readProperty :: Database ->PropertyID -> STM (Property,PropertyValue)
 readProperty db oid = fromMaybe def <$> SM.lookup oid (gdProperties $ dData db)
@@ -402,7 +402,7 @@ writeProperty db mid ((tid,next),v) = do
         (i,off) <- getID mid l
         let p= Property tid next off l
         SM.insert (p,v) i $ gdProperties $ dData db
-        writeTChan (dWrites db) (WrittenProperty i (p,bs))
+        writeTQueue (dWrites db) (WrittenProperty i (p,bs))
         return i
     where
         getID (Just i) l = do
@@ -433,4 +433,4 @@ deleteProperty db oid = do
         Nothing -> return ()
     freeID oid 1 (mdGenPropertyID $ dMetadata db)
     SM.delete oid $ gdProperties $ dData db
-    writeTChan (dWrites db) (DeletedProperty oid)
+    writeTQueue (dWrites db) (DeletedProperty oid)

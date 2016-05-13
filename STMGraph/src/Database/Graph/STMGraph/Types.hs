@@ -36,7 +36,7 @@ import qualified STMContainers.Map as SM
 import Control.Concurrent
 import Control.Concurrent.STM.TVar
 import Control.Monad.STM
-import Control.Concurrent.STM.TChan
+import Control.Concurrent.STM.TQueue
 import           System.IO
 import qualified Data.Aeson as A
 
@@ -473,7 +473,7 @@ data WriteEvent =
 data Database = Database
   { dMetadata :: MetaData
   ,  dData :: GraphData
-  ,  dWrites :: TChan WriteEvent
+  ,  dWrites :: TQueue WriteEvent
   ,  dWriterThread :: MVar ()
   }
 
@@ -481,7 +481,7 @@ newDatabase :: MVar() -> STM Database
 newDatabase mv = Database
     <$> newMetaData
     <*> newGraphData
-    <*> newTChan
+    <*> newTQueue
     <*> pure mv
 
 -- | Handles to the various files

@@ -135,7 +135,7 @@ writeGraph memGraph = withTempDB "hackage-test-stmgraph" True $ \db->do
   --indexPackageNames <- createIndex "packageNames"
   -- _ <- addIndex $ IndexInfo "packageNames" ["Package"] ["name"]
   pkgMap <- foldM (createPackage db) DM.empty $ DM.keys memGraph
-  -- mapM_ (createVersions pkgMap) $ DM.toList memGraph
+  mapM_ (createVersions db pkgMap) $ DM.toList memGraph
   atomically $ withDatabase db nbNodes
   where
     createPackage db m pkg = do
@@ -144,16 +144,16 @@ writeGraph memGraph = withTempDB "hackage-test-stmgraph" True $ \db->do
       -- ml <- liftIO $ Idx.lookup key indexPackageNames
       -- when (Just (goID goPkg) /= ml) $ error $ "wrong lookup: "++ (show key) ++ "->" ++ show ml
       return $ DM.insert pkg goPkg m
-    createVersions pkgMap (pkg,depsByVersion)
-      | Just goPkg <- DM.lookup pkg pkgMap = mapM_ (createVersion goPkg pkgMap) $ DM.toList depsByVersion
+    createVersions db pkgMap (pkg,depsByVersion)
+      | Just goPkg <- DM.lookup pkg pkgMap = mapM_ (createVersion db goPkg pkgMap) $ DM.toList depsByVersion
       | otherwise = return ()
-    createVersion goPkg pkgMap (vr,deps) = do
-      goVer <- addNode "Version" [TextP "name" vr]
-      _ <- addEdge goPkg versions [] goVer
-      mapM_ (createDep goVer pkgMap) deps
-    createDep goVer pkgMap (name,range)
+    createVersion db goPkg pkgMap (vr,deps) = do
+      goVer <- atomically $ withDatabase db $ addNode "Version" [TextP "name" vr]
+      _ <- atomically $ withDatabase db $ addEdge goPkg versions [] goVer
+      mapM_ (createDep db goVer pkgMap) deps
+    createDep db goVer pkgMap (name,range)
       | Just goPkg <- DM.lookup name pkgMap = do
-        _ <- addEdge goVer depends [TextP "range" range] goPkg
+        _ <- atomically $ withDatabase db $ addEdge goVer depends [TextP "range" range] goPkg
         return ()
       | otherwise = return ()
 
