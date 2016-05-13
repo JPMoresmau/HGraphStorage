@@ -40,7 +40,7 @@ spec = do
     it "lookups from names correctly" $ property $
         \(a::String) (b::Int) -> DM.lookup b (fromName $ addToLookup a b def) == Just a
     it "generates ID correctly" $ do
-        ig <- atomically $ newIDGen 1
+        ig <- atomically $ newTVar $ newIDGen 1
         i1 <- atomically $ nextID ig 1
         i1 `shouldBe` 1
         i2 <- atomically $ nextID ig 1
@@ -56,10 +56,10 @@ spec = do
         atomically $ freeID i4 1 ig
         atomically $ freeID i3 1 ig
         atomically $ freeID i5 1 ig
-        m <- atomically $ readTVar (freeIDs ig)
+        (IDGen _ m) <- atomically $ readTVar ig
         DM.null m `shouldBe` True
     it "generates ID correctly bulk" $ do
-        ig <- atomically $ newIDGen 1
+        ig <- atomically $ newTVar $  newIDGen 1
         i1 <- atomically $ nextID ig 1
         i2 <- atomically $ nextID ig 1
         i3 <- atomically $ nextID ig 1

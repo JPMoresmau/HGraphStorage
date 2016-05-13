@@ -1,3 +1,5 @@
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleInstances #-}
 -----------------------------------------------------------------------------
 --
 -- Module      :  Database.Graph.STMGraph.APITypes
@@ -15,11 +17,9 @@
 module Database.Graph.STMGraph.APITypes where
 
 import Database.Graph.STMGraph.Types
-import Database.Graph.STMGraph.Raw
 
-import Control.Monad
 import Control.Monad.STM
-
+import Control.Monad.Trans.State.Strict
 
 import Data.Default
 import qualified Data.Text as T
@@ -27,6 +27,10 @@ import qualified Data.ByteString.Lazy as BS
 import qualified Data.Aeson as A
 import Data.Typeable
 import qualified Data.Set as S
+
+
+type STMGraphT a = StateT Database STM a
+
 
 data NameValue
     = TextP {name::T.Text,tValue:: T.Text}
@@ -56,7 +60,7 @@ shouldCleanTo _ = True
 getCleaned :: Default a => EdgeRemoval -> a -> a -> a
 getCleaned CleanFrom _ to = to
 getCleaned CleanTo from _ = from
-getCleant CleanBoth _ _ = def
+getCleaned CleanBoth _ _ = def
 
 data Traversal
   = Composed [Traversal]
@@ -86,7 +90,7 @@ instance Monoid Traversal where
   mempty = Noop
   mconcat = Composed
 
-data State
+data TState
   = SAllNodes
   | SNodes [(NodeID,Node)]
   | SAllEdges
@@ -97,13 +101,13 @@ data State
   | SError T.Text
   deriving (Show,Read,Eq,Typeable)
 
-instance Monoid State where
+instance Monoid TState where
   SEmpty `mappend` b = b
   a `mappend` SEmpty = a
   SUnknown `mappend` b = b
   a `mappend` SUnknown = a
-  SError e `mappend` b = SError e
-  a `mappend` SError e = SError e
+  SError e `mappend` _ = SError e
+  _ `mappend` SError e = SError e
   SAllNodes `mappend` SAllNodes = SAllNodes
   SAllNodes `mappend` (SNodes _) = SAllNodes
   SNodes a `mappend` SNodes b = SNodes (a `mappend` b)
@@ -130,8 +134,8 @@ instance Monoid Result where
   a `mappend` Empty = a
   Unknown `mappend` b = b
   a `mappend` Unknown = a
-  Error e `mappend` b = Error e
-  a `mappend` Error e = Error e
+  Error e `mappend` _ = Error e
+  _ `mappend` Error e = Error e
   AllNodes `mappend` AllNodes = AllNodes
   AllNodes `mappend` (Nodes _) = AllNodes
   Nodes a `mappend` Nodes b = Nodes (a `mappend` b)
@@ -142,7 +146,7 @@ instance Monoid Result where
   a `mappend` b = Error $ T.pack $ "Unsupported mappend between " ++ show a ++ " and " ++ show b
   mempty = Empty
 
-stateToResult :: State -> Result
+stateToResult :: TState -> Result
 stateToResult SAllNodes = AllNodes
 stateToResult (SNodes ns) = Nodes $ map fst ns
 stateToResult SAllEdges = AllEdges

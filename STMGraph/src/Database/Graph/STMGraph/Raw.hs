@@ -1,4 +1,4 @@
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE RecordWildCards,OverloadedStrings #-}
 -----------------------------------------------------------------------------
 --
 -- Module      :  Database.Graph.STMGraph.Raw
@@ -50,15 +50,15 @@ import System.FilePath
 import System.IO
 import qualified Data.ByteString.Lazy  as BS
 import Control.Concurrent
-import Control.Concurrent.MVar
 import Control.Concurrent.STM.TVar
 import Control.Monad
 import Control.Monad.STM
 import Control.Concurrent.STM.TChan
 import qualified STMContainers.Map as SM
-import qualified STMContainers.Set as SS
 import qualified Data.Map                               as DM
 import qualified Data.Text as T
+import Foreign.Marshal.Alloc
+import Foreign.Ptr
 
 open :: FilePath -> GraphSettings -> IO Database
 open dir gs = do
@@ -91,7 +91,8 @@ open dir gs = do
       return h
     getMMHandle :: (Default a,Storable a) => FilePath -> IO (MMapHandle a)
     getMMHandle name = openMmap (dir </> name) (0,4096) def
-    startWriter hs tc mv = forkFinally (writer hs tc) (\_ -> putMVar mv ())
+    startWriter hs tc mv = void $ forkFinally (withPtrs $ writer hs tc) (\_ -> putMVar mv ())
+
 
 close :: Database -> IO ()
 close Database{..} = do
@@ -113,43 +114,44 @@ load h@Handles{..} mv = do
             db<- newDatabase mv
             writeTVar (mdModel $ dMetadata db) mdl
             return db
-        loadNodes h db
-        loadEdges h db
-        loadProperties h mdl db
+        withPtrs $ \ptrs-> do
+            loadNodes h db ptrs
+            loadEdges h db ptrs
+            loadProperties h mdl db ptrs
         return db
 
-loadNodes :: Handles -> Database -> IO()
-loadNodes Handles{..} Database{..} = foldAllGeneric hNodes nodeSize addNode addNodeID
+loadNodes :: Handles -> Database -> Ptrs ->  IO()
+loadNodes Handles{..} Database{..} Ptrs{..}= foldAllGeneric hNodes ptrsNodes addNode addNodeID
     where
         addNode (i,o) = atomically $ do
             SM.insert o i (gdNodes dData)
-            writeTVar (maxID $ mdGenNodeID dMetadata) i
+            modifyTVar'  (mdGenNodeID dMetadata) (\g->g{maxID=i})
         addNodeID i = atomically $ do
             freeID i 1 (mdGenNodeID dMetadata)
             return ()
 
-loadEdges :: Handles -> Database -> IO()
-loadEdges Handles{..} Database{..} = void $ foldAllGeneric hEdges edgeSize addEdge addEdgeID
+loadEdges :: Handles -> Database -> Ptrs -> IO()
+loadEdges Handles{..} Database{..} Ptrs{..} = void $ foldAllGeneric hEdges ptrsEdges addEdge addEdgeID
     where
         addEdge (i,o) = atomically $ do
             SM.insert o i (gdEdges dData)
-            writeTVar (maxID $ mdGenEdgeID dMetadata) i
+            modifyTVar'  (mdGenEdgeID dMetadata) (\g->g{maxID=i})
         addEdgeID i = atomically $ do
             freeID i 1 (mdGenEdgeID dMetadata)
             return ()
 
-loadProperties :: Handles -> Model -> Database -> IO()
-loadProperties h@Handles{..} mdl Database{..} = void $ foldAllGeneric hProperties propertySize addProperty addPropertyID
+loadProperties :: Handles -> Model -> Database -> Ptrs -> IO()
+loadProperties h@Handles{..} mdl Database{..} Ptrs{..} = void $ foldAllGeneric hProperties ptrsProperties addProperty addPropertyID
     where
         addProperty (i,o) = do
             let mt = DM.lookup (pType o) $ toName $ mPropertyTypes mdl
             case mt of
                 Nothing -> void $ atomically $ freeID i 1 (mdGenPropertyID dMetadata)
-                Just (n,t) -> do
+                Just (_,t) -> do
                     v <- readPropertyValue h t (pOffset o) (pLength o)
                     atomically $ do
                         SM.insert (o,v) i (gdProperties dData)
-                        writeTVar (maxID $ mdGenPropertyID dMetadata) i
+                        modifyTVar'  (mdGenPropertyID dMetadata) (\g->g{maxID=i})
         addPropertyID i = atomically $ do
             freeID i 1 (mdGenPropertyID dMetadata)
             return ()
@@ -167,31 +169,51 @@ readPropertyValue Handles{..} dt off len = do
   toValue dt <$> BS.hGet h (fromIntegral len)
 
 -- | Read all binary Nodes from a given handle, generating their IDs from their offset
+--foldAllGeneric
+--  :: (Integral a, Eq b, Binary b, Default b)
+--  => Handle -> Int64
+--  -> ((a,b) -> IO ()) -- ^ callback on item
+--  -> (a -> IO ()) -- ^ callback on empty
+--  -> IO ()
+--foldAllGeneric h sz f1 f2 = do
+--  hSeek h AbsoluteSeek 0
+--  go (fromIntegral sz) 0
+--  where go isz a = do
+--            bs <- BS.hGet h isz
+--            unless (BS.null bs) $
+--              do
+--                let b = decode bs
+--                    i = a + 1
+--                if b == def
+--                         then f2 i
+--                         else f1 (i,b)
+--                go isz i
+
 foldAllGeneric
-  :: (Integral a, Eq b, Binary b, Default b)
-  => Handle -> Int64
+  :: (Integral a, Eq b, Storable b, Default b)
+  => Handle -> (Ptr b,Int)
   -> ((a,b) -> IO ()) -- ^ callback on item
   -> (a -> IO ()) -- ^ callback on empty
   -> IO ()
-foldAllGeneric h sz f1 f2 = do
+foldAllGeneric h (ptr,sz) f1 f2 = do
   hSeek h AbsoluteSeek 0
-  go (fromIntegral sz) 0
-  where go isz a = do
-            bs <- BS.hGet h isz
-            unless (BS.null bs) $
+  go 0
+  where go a = do
+            cnt <- hGetBuf h ptr sz
+            unless (cnt<sz) $
               do
-                let b = decode bs
-                    i = a + 1
+                b <- peek ptr
+                let    i = a + 1
                 if b == def
                          then f2 i
                          else f1 (i,b)
-                go isz i
+                go i
 
-writer :: Handles -> TChan WriteEvent -> IO ()
-writer hs@Handles{..} tc = do
+writer :: Handles -> TChan WriteEvent  -> Ptrs -> IO ()
+writer hs@Handles{..} tc ptrs@Ptrs{..} = do
     e <- atomically $ readTChan tc
     handle e
-    unless (e == ClosedDatabase) $ writer hs tc
+    unless (e == ClosedDatabase) $ writer hs tc ptrs
     where
         handle ClosedDatabase = do
             hClose hNodes
@@ -206,22 +228,43 @@ writer hs@Handles{..} tc = do
             hFlush hPropertyValues
             putMVar mv ()
         handle (WrittenModel mdl) = writeFile hModel (modelToString mdl)
-        handle (WrittenNode oid obj) = writeGeneric hNodes nodeSize oid obj
-        handle (WrittenEdge rid rel) = writeGeneric hEdges edgeSize rid rel
+        handle (WrittenNode oid obj) = writeGeneric hNodes ptrsNodes oid obj
+        handle (WrittenEdge rid rel) = writeGeneric hEdges ptrsEdges rid rel
         handle (WrittenProperty pid (pro,val)) = do
-            writeGeneric hProperties propertySize pid pro
+            writeGeneric hProperties ptrsProperties pid pro
             hSeek hPropertyValues AbsoluteSeek (toInteger $ pOffset pro)
             BS.hPut hPropertyValues val
-        handle (DeletedNode oid) = writeGeneric hNodes nodeSize oid (def::Node)
-        handle (DeletedEdge rid) = writeGeneric hEdges edgeSize rid (def::Edge)
-        handle (DeletedProperty pid) = writeGeneric hProperties propertySize pid (def::Property)
+        handle (DeletedNode oid) = writeGeneric hNodes ptrsNodes oid (def::Node)
+        handle (DeletedEdge rid) = writeGeneric hEdges ptrsEdges rid (def::Edge)
+        handle (DeletedProperty pid) = writeGeneric hProperties ptrsProperties pid (def::Property)
 
+data Ptrs = Ptrs
+    { ptrsNodes :: (Ptr Node, Int)
+    , ptrsEdges :: (Ptr Edge, Int)
+    , ptrsProperties :: (Ptr Property,Int)
+    }
+
+withPtrs :: (Ptrs -> IO a) -> IO a
+withPtrs f= do
+    let nsz = fromIntegral nodeSize
+        esz = fromIntegral edgeSize
+        psz = fromIntegral propertySize
+    allocaBytes nsz $ \nptr->
+        allocaBytes esz $ \eptr->
+            allocaBytes psz $ \pptr->
+                f $ Ptrs (nptr,nsz) (eptr,esz) (pptr,psz)
 
 -- | Generic write operation: write the given binary using the given ID and record size
-writeGeneric :: (Integral a,Binary a,Default a, Binary b) => Handle -> Int64 -> a -> b -> IO ()
-writeGeneric h sz a b =  do
+--writeGeneric :: (Integral a, Binary b) => Handle -> Int64 -> a -> b -> IO ()
+--writeGeneric h sz a b =  do
+--    hSeek h AbsoluteSeek (toInteger (a - 1) * toInteger sz)
+--    BS.hPut h $ encode b
+
+writeGeneric :: (Integral a, Storable b) => Handle -> (Ptr b, Int) -> a-> b -> IO ()
+writeGeneric h (ptr,sz) a b =  do
     hSeek h AbsoluteSeek (toInteger (a - 1) * toInteger sz)
-    BS.hPut h $ encode b
+    poke ptr b
+    hPutBuf h ptr sz
 
 updateModel ::  (Model -> Model) -> Database ->STM ()
 updateModel upd db = do

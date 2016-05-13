@@ -1,5 +1,5 @@
-{-# LANGUAGE RankNTypes, OverloadedStrings, PatternGuards, ScopedTypeVariables,FlexibleContexts #-}
-module Database.Graph.HGraphStorage.HackageTest where
+{-# LANGUAGE RankNTypes, OverloadedStrings, PatternGuards, ScopedTypeVariables #-}
+module Database.Graph.STMGraph.HackageTest where
 
 import Control.Applicative
 import qualified Codec.Archive.Tar as Tar
@@ -20,15 +20,20 @@ import Control.Monad.Logger
 import qualified Control.Monad.Trans.Resource as R
 import Data.Binary
 
-
-import Database.Graph.HGraphStorage.API
-import Database.Graph.HGraphStorage.Index as Idx
-import Database.Graph.HGraphStorage.Types
+import Control.Monad.STM
+import Database.Graph.STMGraph.API
 import Control.Monad.IO.Class (liftIO)
 import Data.Default (def)
-import Database.Graph.HGraphStorage.Query
 
-buildHackageGraph :: IO(DM.Map T.Text (DM.Map T.Text [(T.Text,T.Text)]))
+import Network.HTTP.Client
+import Control.Exception
+import Debug.Trace
+
+import           System.IO
+
+type GraphMap = DM.Map T.Text (DM.Map T.Text [(T.Text,T.Text)])
+
+buildHackageGraph :: IO GraphMap
 buildHackageGraph = do
     let serf= "data" </> "index.bin"
     ex <- doesFileExist serf
@@ -36,6 +41,12 @@ buildHackageGraph = do
       then decode <$> BS.readFile serf
       else do
         let f= "data" </> "index.tar.gz"
+        exgz <- doesFileExist f
+        when (not exgz) $ do
+            manager <- newManager defaultManagerSettings
+            request <- parseUrl "http://hackage.haskell.org/packages/index.tar.gz"
+            response <- httpLbs request manager
+            BS.writeFile f $ responseBody response
         tmp <- getTemporaryDirectory
         let fldr=tmp </> "hackage-bench"
         createDirectoryIfMissing True fldr
@@ -57,7 +68,7 @@ buildHackageGraph = do
 --    toText2 (Dependency (PackageName name) range)=(T.pack name,T.pack $ show range)
 
 
--- |Un-gzip and un-tar a file into a folder.
+-- | Un-gzip and un-tar a file into a folder.
 unTarGzip :: FilePath -> FilePath -> IO ()
 unTarGzip res folder = do
   cnts <- BS.readFile res
@@ -79,8 +90,7 @@ unTarGzip res folder = do
 
 
 createMemoryGraph :: FilePath
-                       -> IO
-                            (DM.Map T.Text (DM.Map T.Text [(T.Text,T.Text)]))
+                       -> IO GraphMap
 createMemoryGraph folder = do
   cnts <- getSubDirs folder
   foldM processPackage DM.empty cnts
@@ -120,15 +130,16 @@ getSubDirs folder = do
           else return False
 
 
-writeGraph :: GraphSettings -> DM.Map T.Text (DM.Map T.Text [(T.Text,T.Text)]) -> IO ()
-writeGraph gs memGraph = withTempDB "hackage-test-graph" True gs $ do
+writeGraph :: GraphMap -> IO Int
+writeGraph memGraph = withTempDB "hackage-test-stmgraph" True $ \db->do
   --indexPackageNames <- createIndex "packageNames"
-  _ <- addIndex $ IndexInfo "packageNames" ["Package"] ["name"]
-  pkgMap <- foldM createPackage DM.empty $ DM.keys memGraph
-  mapM_ (createVersions pkgMap) $ DM.toList memGraph
+  -- _ <- addIndex $ IndexInfo "packageNames" ["Package"] ["name"]
+  pkgMap <- foldM (createPackage db) DM.empty $ DM.keys memGraph
+  -- mapM_ (createVersions pkgMap) $ DM.toList memGraph
+  atomically $ withDatabase db nbNodes
   where
-    createPackage m pkg = do
-      goPkg <- createObject $ GraphObject Nothing "Package" $ DM.fromList [("name",[PVText pkg])]
+    createPackage db m pkg = do
+      goPkg <- atomically $ withDatabase db $ addNode "Package" [TextP "name" pkg]
       --liftIO $ putStrLn $ (T.unpack pkg) ++"->" ++ (show $ textToKey pkg) ++ ":" ++ (show $ goID goPkg)
       -- ml <- liftIO $ Idx.lookup key indexPackageNames
       -- when (Just (goID goPkg) /= ml) $ error $ "wrong lookup: "++ (show key) ++ "->" ++ show ml
@@ -137,45 +148,45 @@ writeGraph gs memGraph = withTempDB "hackage-test-graph" True gs $ do
       | Just goPkg <- DM.lookup pkg pkgMap = mapM_ (createVersion goPkg pkgMap) $ DM.toList depsByVersion
       | otherwise = return ()
     createVersion goPkg pkgMap (vr,deps) = do
-      goVer <- createObject $ GraphObject Nothing "Version" $ DM.fromList [("name",[PVText vr])]
-      _ <- createRelation' $ GraphRelation Nothing goPkg goVer versions DM.empty
+      goVer <- addNode "Version" [TextP "name" vr]
+      _ <- addEdge goPkg versions [] goVer
       mapM_ (createDep goVer pkgMap) deps
     createDep goVer pkgMap (name,range)
       | Just goPkg <- DM.lookup name pkgMap = do
-        _ <- createRelation' $ GraphRelation Nothing goVer goPkg depends $ DM.fromList [("range",[PVText range])]
+        _ <- addEdge goVer depends [TextP "range" range] goPkg
         return ()
       | otherwise = return ()
 
-
-nameIndex :: DM.Map T.Text (DM.Map T.Text [(T.Text,T.Text)]) -> IO ()
-nameIndex memGraph = withTempDB "hackage-test-graph" False def $ do
-  indexPackageNames <- (snd . head) <$> getIndices
-  -- :: Trie Int16 ObjectID <- createIndex "packageNames"
-  let ks = DM.keys memGraph
-  let pkgLen = length ks
-  pkgMap <- foldM (getPackage indexPackageNames) DM.empty ks
-  let idLen = length $ DM.keys pkgMap
-  when (pkgLen /= idLen) $ error $ "wrong length:" ++ show idLen
-  return ()
-  where
-    getPackage indexPackageNames m pkg = do
-      mid <- liftIO $ Idx.lookup (textToKey pkg) indexPackageNames
-      return $ case mid of
-        Just oid -> DM.insert oid pkg m
-        _ -> error $ "empty lookup:" ++ T.unpack pkg
-
-yesodQuery :: IO Int
-yesodQuery  = withTempDB "hackage-test-graph" False def $ do
-  indexPackageNames <- (snd . head) <$> getIndices
-  -- :: Trie Int16 ObjectID <- createIndex "packageNames"
-  mid <- liftIO $ Idx.lookup (textToKey "yesod") indexPackageNames
-  case mid of
-    Just oid -> do
-      res <- queryStep oid def{rsRelTypes=[versions],rsDirection = OUT}
-      let l = length res
-      when (l < 111) $ error "less than 111 versions for yesod"
-      return l
-    _ -> error "empty lookup for yesod"
+--
+--nameIndex :: DM.Map T.Text (DM.Map T.Text [(T.Text,T.Text)]) -> IO ()
+--nameIndex memGraph = withTempDB "hackage-test-graph" False def $ do
+--  indexPackageNames <- (snd . head) <$> getIndices
+--  -- :: Trie Int16 ObjectID <- createIndex "packageNames"
+--  let ks = DM.keys memGraph
+--  let pkgLen = length ks
+--  pkgMap <- foldM (getPackage indexPackageNames) DM.empty ks
+--  let idLen = length $ DM.keys pkgMap
+--  when (pkgLen /= idLen) $ error $ "wrong length:" ++ show idLen
+--  return ()
+--  where
+--    getPackage indexPackageNames m pkg = do
+--      mid <- liftIO $ Idx.lookup (textToKey pkg) indexPackageNames
+--      return $ case mid of
+--        Just oid -> DM.insert oid pkg m
+--        _ -> error $ "empty lookup:" ++ T.unpack pkg
+--
+--yesodQuery :: IO Int
+--yesodQuery  = withTempDB "hackage-test-graph" False def $ do
+--  indexPackageNames <- (snd . head) <$> getIndices
+--  -- :: Trie Int16 ObjectID <- createIndex "packageNames"
+--  mid <- liftIO $ Idx.lookup (textToKey "yesod") indexPackageNames
+--  case mid of
+--    Just oid -> do
+--      res <- queryStep oid def{rsRelTypes=[versions],rsDirection = OUT}
+--      let l = length res
+--      when (l < 111) $ error "less than 111 versions for yesod"
+--      return l
+--    _ -> error "empty lookup for yesod"
 
 
 versions :: T.Text
@@ -185,13 +196,17 @@ depends :: T.Text
 depends = "depends"
 
 withTempDB :: forall b.
-  FilePath -> Bool -> GraphSettings -> GraphStorageT (R.ResourceT (LoggingT IO)) b
+  FilePath -> Bool -> (Database -> IO b)
                 -> IO b
-withTempDB fn del gs f = do
+withTempDB fn del f = do
   tmp <- getTemporaryDirectory
   let dir = tmp </> fn
   ex <- doesDirectoryExist dir
   when (ex && del) $ do
     cnts <- getDirectoryContents dir
     mapM_ removeFile =<< filterM doesFileExist (map (dir </>) cnts)
-  runStderrLoggingT $ withGraphStorage dir gs f
+  bracket
+        (open dir def)
+        close
+        (\db->f db)
+--{gsMainBuffering=Just $ BlockBuffering $ Just 4096}

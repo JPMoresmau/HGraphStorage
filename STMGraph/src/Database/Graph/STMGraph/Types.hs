@@ -31,22 +31,14 @@ import GHC.Generics
 import qualified Data.ByteString.Lazy as BS
 import Data.Text.Encoding (decodeUtf8, encodeUtf8)
 import qualified Data.Text as T
-import           Data.Bits
 import qualified Data.Map                               as DM
 import qualified STMContainers.Map as SM
-import qualified STMContainers.Set as SS
 import Control.Concurrent
 import Control.Concurrent.STM.TVar
-import Control.Concurrent.MVar
 import Control.Monad.STM
 import Control.Concurrent.STM.TChan
 import           System.IO
-import qualified ListT
-import Data.Hashable
-import Focus
 import qualified Data.Aeson as A
-import qualified Data.Aeson.Parser as A
-import qualified Data.Attoparsec.ByteString as A
 
 -- | IDs for Nodes
 type NodeID       = Int64
@@ -85,7 +77,13 @@ data Node = Node
   } deriving (Show,Read,Eq,Ord,Typeable,Generic)
 
 -- | Simple binary instance
-instance Binary Node
+instance Binary Node where
+    put (Node tp f t p) = do
+        put tp
+        put f
+        put t
+        put p
+    get = Node <$> get <*> get <*> get <*> get
 
 -- | Simple default instance
 instance Default Node where
@@ -128,7 +126,17 @@ data Edge = Edge
   } deriving (Show,Read,Eq,Ord,Typeable,Generic)
 
 -- | simple binary instance
-instance Binary Edge
+instance Binary Edge where
+    put (Edge f ft t tt tp fn tn p) = do
+        put f
+        put ft
+        put t
+        put tt
+        put tp
+        put fn
+        put tn
+        put p
+    get = Edge <$> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get
 
 -- | simple default instance
 instance Default Edge where
@@ -167,7 +175,13 @@ data Property = Property
   } deriving (Show,Read,Eq,Ord,Typeable,Generic)
 
 -- | simple binary instance
-instance Binary Property
+instance Binary Property where
+    put (Property tp n o l) = do
+        put tp
+        put n
+        put o
+        put l
+    get = Property <$> get <*> get <*> get <*> get
 
 -- | simple default instance
 instance Default Property where
@@ -356,46 +370,43 @@ instance Default Model where
 
 
 data IDGen = IDGen
-    { maxID :: TVar Int64
-    ,  freeIDs :: TVar (DM.Map Int64 Int64)
+    { maxID :: {-# UNPACK #-} !Int64
+    ,  freeIDs ::  !(DM.Map Int64 Int64)
     }
 
-nextID ::  IDGen -> Int64 -> STM Int64
-nextID IDGen{..} l = do
-    m <- readTVar freeIDs
-    (m2,i) <- go m $ DM.toAscList m
-    writeTVar freeIDs m2
+nextID ::  TVar IDGen -> Int64 -> STM Int64
+nextID tv l = do
+    g <- readTVar tv
+    let m = freeIDs g
+    let (g2,i) = go g $ DM.toAscList m
+    writeTVar tv $! g2
     return i
     where
-        go m [] = do
-                        mi<-readTVar maxID
-                        let ni=mi+l
-                        writeTVar maxID ni
-                        return (m,mi)
-        go m ((i,il):_) | l == il = do
-                    let m2=DM.delete i m
-                    return (m2,i)
-        go m ((i,il):rs) | l > il = go m rs
-        go m ((i,il):_) | l < il = do
-                    let m2=DM.delete i m
-                    let m3=DM.insert (i+l) (il-l) m2
-                    return (m3,i)
+        go g  [] =
+            let mi = maxID g
+            in (g{maxID=mi+l},mi)
+        go g ((i,il):_) | l == il =
+                    let m2=DM.delete i (freeIDs g)
+                    in (g{freeIDs=m2} ,i)
+        go g ((_,il):rs) | l > il = go g rs
+        go g ((i,il):_) =
+                    let m2=DM.delete i (freeIDs g)
+                        m3=DM.insert (i+l) (il-l) m2
+                    in (g{freeIDs=m3},i)
 
-freeID :: Int64 -> Int64 -> IDGen -> STM ()
-freeID i l IDGen{..} = do
-    mi <- readTVar maxID
-    m <- readTVar freeIDs
-    m2<-if i+l==mi
-                    then do
-                        let (m2,li)=removeLast m i
-                        writeTVar maxID li
-                        return m2
-                    else do
+freeID :: Int64 -> Int64 -> TVar IDGen -> STM ()
+freeID i l tv = do
+    g <- readTVar tv
+    let mi = maxID g
+    let m = freeIDs g
+    let (m2,mi2)=if i+l==mi
+                    then removeLast m i
+                      else
                         let
                           mBef = DM.lookupLT i m
                           mAft = DM.lookupGT i m
-                        return $ clean mi $ defrag mBef mAft i l m
-    writeTVar freeIDs m2
+                        in (clean mi $ defrag mBef mAft i l m,mi)
+    writeTVar tv (IDGen mi2 m2)
     where
         removeLast m i =
            case DM.lookupLE i m of
@@ -414,24 +425,24 @@ freeID i l IDGen{..} = do
                     else m
 
 
-newIDGen :: Int64 -> STM IDGen
-newIDGen st= IDGen <$> newTVar st <*> newTVar DM.empty
+newIDGen :: Int64 -> IDGen
+newIDGen st= IDGen st DM.empty
 
 data MetaData = MetaData
   { mdModel :: TVar Model
-  ,  mdGenNodeID :: IDGen
-  ,  mdGenEdgeID :: IDGen
-  ,  mdGenPropertyID :: IDGen
-  ,  mdGenPropertyOffset :: IDGen
+  ,  mdGenNodeID :: TVar IDGen
+  ,  mdGenEdgeID :: TVar IDGen
+  ,  mdGenPropertyID :: TVar IDGen
+  ,  mdGenPropertyOffset :: TVar IDGen
   }
 
 newMetaData :: STM MetaData
 newMetaData = MetaData
     <$> newTVar def
-    <*> newIDGen 1
-    <*> newIDGen 1
-    <*> newIDGen 1
-    <*> newIDGen 0
+    <*> newTVar (newIDGen 1)
+    <*> newTVar (newIDGen 1)
+    <*> newTVar (newIDGen 1)
+    <*> newTVar (newIDGen 0)
 
 
 data GraphData = GraphData

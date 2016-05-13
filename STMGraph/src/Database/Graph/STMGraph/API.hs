@@ -1,6 +1,16 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Database.Graph.STMGraph.API
-  ( nbNodes
+  ( open
+  , close
+  , checkpoint
+  , Database
+
+  , STMGraphT
+  , GraphSettings(..)
+  , withDatabaseIO
+  , withDatabase
+
+  , nbNodes
   , nbEdges
   , addNode
   , removeNode
@@ -19,25 +29,23 @@ import Database.Graph.STMGraph.APITypes
 import Database.Graph.STMGraph.Types
 import Database.Graph.STMGraph.Raw
 
+import Control.Exception
 import Control.Monad
 import Control.Monad.STM
 
 import Data.Monoid
 import Data.Default
-import Data.List
 import qualified Data.Text as T
-import qualified Data.ByteString.Lazy as BS
-import qualified Data.Aeson as A
-import Data.Typeable
 import qualified ListT
 import qualified STMContainers.Map as SM
-import qualified Data.Set as S
+import Control.Monad.Trans.State.Strict
+import Control.Monad.Trans.Class (MonadTrans(lift))
 
-nbNodes :: Database -> STM Int
-nbNodes db = ListT.fold (\c _->return (c+1)) 0 $ SM.stream (gdNodes $ dData db)
+nbNodes :: STMGraphT Int
+nbNodes = withDB $ \db-> ListT.fold (\c _->return (c+1)) 0 $ SM.stream (gdNodes $ dData db)
 
-nbEdges :: Database -> STM Int
-nbEdges db = ListT.fold (\c _->return (c+1)) 0 $ SM.stream (gdEdges $ dData db)
+nbEdges :: STMGraphT Int
+nbEdges  = withDB $ \db-> ListT.fold (\c _->return (c+1)) 0 $ SM.stream (gdEdges $ dData db)
 
 toPropertyValue :: NameValue -> (T.Text,PropertyValue)
 toPropertyValue (TextP n v)=(n,PVText v)
@@ -51,28 +59,43 @@ toNameValue (n,PVInteger v) = IntP n v
 toNameValue (n,PVBinary v) = BinP n v
 toNameValue (n,PVJSON v) = JsonP n v
 
-addNode :: Database -> T.Text -> [NameValue] -> STM NodeID
-addNode db tp props = do
-  pid <- createProperties db props
-  tid <- getNodeTypeID db tp
-  let obj=Node tid def def pid
-  writeNode db Nothing obj
+withDatabaseIO ::  FilePath -> GraphSettings -> STMGraphT a -> IO a
+withDatabaseIO path gs f =
+    bracket
+        (open path gs)
+        close
+        (\db->atomically $ withDatabase db f)
 
-removeNode ::Database -> NodeID -> STM ()
-removeNode db nid = do
+withDatabase :: Database -> STMGraphT a -> STM a
+withDatabase db f = evalStateT f db
+
+withDB :: (Database -> STM a) -> STMGraphT a
+withDB f = do
+    db <- get
+    lift $ f db
+
+addNode :: T.Text -> [NameValue] -> STMGraphT NodeID
+addNode tp props = withDB $ \db-> do
+      pid <- createProperties db props
+      tid <- getNodeTypeID db tp
+      let obj=Node tid def def pid
+      writeNode db Nothing obj
+
+removeNode :: NodeID -> STMGraphT ()
+removeNode nid = withDB $ \db-> do
     n <- readNode db nid
     deleteProperties db $ nFirstProperty n
-    removeEdges CleanTo $ nFirstFrom n
-    removeEdges CleanFrom $ nFirstTo n
+    removeEdges db CleanTo $ nFirstFrom n
+    removeEdges db CleanFrom $ nFirstTo n
     deleteNode db nid
   where
-    removeEdges rem eid
+    removeEdges db rem eid
      | eid == def = return ()
-     | otherwise = removeEdges rem =<< removeEdge' db eid rem
+     | otherwise = removeEdges db rem =<< removeEdge' db eid rem
 
 
-nodeProperties :: Database -> NodeID -> ([NameValue] -> STM [NameValue]) -> STM [NameValue]
-nodeProperties db nid upd = do
+nodeProperties :: NodeID -> ([NameValue] -> STM [NameValue]) -> STMGraphT [NameValue]
+nodeProperties nid upd = withDB $ \db-> do
     n <- readNode db nid
     oldVals <- getNodeProperties db n
     newVals <- upd oldVals
@@ -82,8 +105,8 @@ nodeProperties db nid upd = do
         void $ writeNode db (Just nid) (n{nFirstProperty=pid})
     return newVals
 
-addEdge :: Database -> NodeID -> T.Text -> [NameValue] -> NodeID -> STM EdgeID
-addEdge db from tp props to = do
+addEdge :: NodeID -> T.Text -> [NameValue] -> NodeID -> STMGraphT EdgeID
+addEdge from tp props to = withDB $ \db-> do
   fromN<-readNode db from
   toN <- readNode db to
   addEdge' db (from,fromN) tp props (to,toN)
@@ -98,8 +121,8 @@ addEdge' db (from,fn) tp props (to,tn) = do
   writeNode db (Just to) (tn{nFirstTo=eid})
   return eid
 
-removeEdge :: Database -> EdgeID -> STM ()
-removeEdge db eid = void $ removeEdge' db eid CleanBoth
+removeEdge :: EdgeID -> STMGraphT ()
+removeEdge eid = withDB $ \db-> void $ removeEdge' db eid CleanBoth
 
 removeEdge' :: Database -> EdgeID -> EdgeRemoval -> STM EdgeID
 removeEdge' db eid rem
@@ -141,8 +164,8 @@ removeEdge' db eid rem
                 then void $ writeEdge db (Just crid) $ setNext rel
                 else fixChain nid getNext setNext
 
-edgeProperties :: Database -> EdgeID -> ([NameValue] -> STM [NameValue]) -> STM [NameValue]
-edgeProperties db eid upd = do
+edgeProperties :: EdgeID -> ([NameValue] -> STM [NameValue]) -> STMGraphT [NameValue]
+edgeProperties eid upd = withDB $ \db->do
     e <- readEdge db eid
     oldVals <- getEdgeProperties db e
     newVals <- upd oldVals
@@ -208,36 +231,36 @@ edgeHasNamedValue db e nv = do
   nvs <- getEdgeProperties db e
   return $ nv `elem` nvs
 
-traverseGraph :: Database -> Traversal -> STM Result
-traverseGraph db t = stateToResult <$> doTraverse db SUnknown t
+traverseGraph :: Traversal -> STMGraphT Result
+traverseGraph t = stateToResult <$> withDB (\db -> doTraverse db SUnknown t)
 
 
-doTraverse :: Database -> State -> Traversal -> STM State
-doTraverse db SEmpty _ = return SEmpty
-doTraverse db r Noop = return r
+doTraverse :: Database -> TState -> Traversal -> STM TState
+doTraverse _ SEmpty _ = return SEmpty
+doTraverse _ r Noop = return r
 doTraverse db st (Composed ts) = foldM (doTraverse db) st ts
-doTraverse db _ Ns = return SAllNodes
-doTraverse db _ Es = return SAllEdges
+doTraverse _ _ Ns = return SAllNodes
+doTraverse _ _ Es = return SAllEdges
 doTraverse db SAllNodes (NID nids) = do
     ns <- filter (\(_,n)-> n/= def) <$> mapM (\nid ->
         do
             n<-readNode db nid
             return (nid,n)) nids
     return $ nodesIfAny ns
-doTraverse db (SNodes ns) (NID nids) =  do
+doTraverse _ (SNodes ns) (NID nids) =  do
     let fs = filter (\(nid,_)->nid `elem` nids) ns
     return $ nodesIfAny fs
-doTraverse db _ (NID _) = return SEmpty
+doTraverse _ _ (NID _) = return SEmpty
 doTraverse db SAllEdges (EID eids) = do
     ns <- filter (\(_,e)-> e/= def) <$> mapM (\eid ->
         do
             e<-readEdge db eid
             return (eid,e)) eids
     return $ edgesIfAny ns
-doTraverse db (SEdges es) (EID eids) =  do
+doTraverse _ (SEdges es) (EID eids) =  do
     let fs = filter (\(eid,_)->eid `elem` eids) es
     return $ edgesIfAny fs
-doTraverse db _ (EID _) = return SEmpty
+doTraverse _ _ (EID _) = return SEmpty
 doTraverse db SAllNodes (Has nv) = do
   let st = SM.stream $ gdNodes $ dData db
   fs <- ListT.fold (\l (nid,n)->do
@@ -308,7 +331,7 @@ doTraverse db r (BothE eTypes)
         return $ inEs <> outEs
 doTraverse _ r t = return $ SError $ "Traversal not handled: " <> T.pack (show t) <> " in state: " <> T.pack (show r)
 
-readProperties :: Database -> State -> Maybe [T.Text] -> STM State
+readProperties :: Database -> TState -> Maybe [T.Text] -> STM TState
 readProperties db SAllNodes mvs = do
     let st = SM.stream $ gdNodes $ dData db
     getPropNames mvs <$> ListT.fold (\l (nid,n)-> do
@@ -325,8 +348,9 @@ readProperties db SAllEdges mvs = do
       ) [] st
 readProperties db (SEdges es) mvs =
     getPropNames mvs <$> mapM (\(eid,e)->addEdgeInfo db (eid,e) =<<getNamedProperties db (eFirstProperty e) mvs) es
+readProperties _ st _ = return $ SError $ "Properties not handled in state: " <> T.pack (show st)
 
-edgesToNodes :: (Edge -> NodeID) -> Database -> State -> STM State
+edgesToNodes :: (Edge -> NodeID) -> Database -> TState -> STM TState
 edgesToNodes f db (SEdges es) =do
     fs <- mapM (\(_,e)->do
                 let nid=f e
@@ -351,15 +375,15 @@ addEdgeInfo db (eid,e) nvs = do
         Just t -> return $ EdgeInfo eid t nvs
 
 
-getPropNames :: Maybe [T.Text]  -> [Info] -> State
+getPropNames :: Maybe [T.Text]  -> [Info] -> TState
 getPropNames (Just vs) nvs = SProperties vs nvs
 getPropNames _ nvs = SProperties (ordNub $ concatMap (map name . properties) nvs) nvs
 
-nodesIfAny :: [(NodeID,Node)] -> State
+nodesIfAny :: [(NodeID,Node)] -> TState
 nodesIfAny [] = SEmpty
 nodesIfAny ns = SNodes ns
 
-edgesIfAny :: [(EdgeID,Edge)] -> State
+edgesIfAny :: [(EdgeID,Edge)] -> TState
 edgesIfAny [] = SEmpty
 edgesIfAny es = SEdges es
 
