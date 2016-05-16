@@ -131,29 +131,29 @@ getSubDirs folder = do
 
 
 writeGraph :: GraphMap -> IO Int
-writeGraph memGraph = withTempDB "hackage-test-stmgraph" True $ \db->do
+writeGraph memGraph = withTempDB "hackage-test-stmgraph" True $ do
   --indexPackageNames <- createIndex "packageNames"
   -- _ <- addIndex $ IndexInfo "packageNames" ["Package"] ["name"]
-  pkgMap <- foldM (createPackage db) DM.empty $ DM.keys memGraph
-  mapM_ (createVersions db pkgMap) $ DM.toList memGraph
-  atomically $ withDatabase db nbNodes
+  pkgMap <- foldM createPackage DM.empty $ DM.keys memGraph
+  mapM_ (createVersions pkgMap) $ DM.toList memGraph
+  nbNodes
   where
-    createPackage db m pkg = do
-      goPkg <- atomically $ withDatabase db $ addNode "Package" [TextP "name" pkg]
+    createPackage m pkg = do
+      goPkg <-addNode "Package" [TextP "name" pkg]
       --liftIO $ putStrLn $ (T.unpack pkg) ++"->" ++ (show $ textToKey pkg) ++ ":" ++ (show $ goID goPkg)
       -- ml <- liftIO $ Idx.lookup key indexPackageNames
       -- when (Just (goID goPkg) /= ml) $ error $ "wrong lookup: "++ (show key) ++ "->" ++ show ml
       return $ DM.insert pkg goPkg m
-    createVersions db pkgMap (pkg,depsByVersion)
-      | Just goPkg <- DM.lookup pkg pkgMap = mapM_ (createVersion db goPkg pkgMap) $ DM.toList depsByVersion
+    createVersions pkgMap (pkg,depsByVersion)
+      | Just goPkg <- DM.lookup pkg pkgMap = mapM_ (createVersion goPkg pkgMap) $ DM.toList depsByVersion
       | otherwise = return ()
-    createVersion db goPkg pkgMap (vr,deps) = do
-      goVer <- atomically $ withDatabase db $ addNode "Version" [TextP "name" vr]
-      _ <- atomically $ withDatabase db $ addEdge goPkg versions [] goVer
-      mapM_ (createDep db goVer pkgMap) deps
-    createDep db goVer pkgMap (name,range)
+    createVersion goPkg pkgMap (vr,deps) = do
+      goVer <- addNode "Version" [TextP "name" vr]
+      _ <- addEdge goPkg versions [] goVer
+      mapM_ (createDep goVer pkgMap) deps
+    createDep goVer pkgMap (name,range)
       | Just goPkg <- DM.lookup name pkgMap = do
-        _ <- atomically $ withDatabase db $ addEdge goVer depends [TextP "range" range] goPkg
+        _ <- addEdge goVer depends [TextP "range" range] goPkg
         return ()
       | otherwise = return ()
 
@@ -196,7 +196,7 @@ depends :: T.Text
 depends = "depends"
 
 withTempDB :: forall b.
-  FilePath -> Bool -> (Database -> IO b)
+  FilePath -> Bool -> (STMGraphT (R.ResourceT IO) b)
                 -> IO b
 withTempDB fn del f = do
   tmp <- getTemporaryDirectory
@@ -205,8 +205,5 @@ withTempDB fn del f = do
   when (ex && del) $ do
     cnts <- getDirectoryContents dir
     mapM_ removeFile =<< filterM doesFileExist (map (dir </>) cnts)
-  bracket
-        (open dir def)
-        close
-        (\db->f db)
+  withDatabaseIO dir def f
 --{gsMainBuffering=Just $ BlockBuffering $ Just 4096}

@@ -1,5 +1,9 @@
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 -----------------------------------------------------------------------------
 --
 -- Module      :  Database.Graph.STMGraph.APITypes
@@ -18,8 +22,19 @@ module Database.Graph.STMGraph.APITypes where
 
 import Database.Graph.STMGraph.Types
 
-import Control.Monad.STM
 import Control.Monad.Trans.State.Strict
+
+import Control.Applicative
+import Control.Monad (MonadPlus)
+import Control.Monad.Base (MonadBase(..))
+import Control.Monad.Fix (MonadFix)
+import Control.Monad.IO.Class (MonadIO)
+import Control.Monad.Trans.Class (MonadTrans(lift))
+import Control.Monad.Trans.Control ( MonadTransControl(..), MonadBaseControl(..)
+                                   , ComposeSt, defaultLiftBaseWith
+                                   , defaultRestoreM )
+import Control.Monad.Logger
+import qualified Control.Monad.Trans.Resource as R
 
 import Data.Default
 import qualified Data.Text as T
@@ -29,8 +44,33 @@ import Data.Typeable
 import qualified Data.Set as S
 
 
-type STMGraphT a = StateT Database STM a
+-- | Our monad transformer.
+newtype STMGraphT m a = Gs { unIs :: StateT Database m a }
+    deriving ( Functor, Applicative, Alternative, Monad
+             , MonadFix, MonadPlus, MonadIO, MonadTrans
+             , R.MonadThrow )
+-- | Monad Resource instance.
+deriving instance R.MonadResource m => R.MonadResource (STMGraphT m)
 
+-- | Monad Base instance.
+instance MonadBase b m => MonadBase b (STMGraphT m) where
+    liftBase = lift . liftBase
+
+-- | Monad Trans Control instance.
+instance MonadTransControl STMGraphT where
+    type StT STMGraphT a = StT (StateT Database) a
+    liftWith f = Gs $ liftWith (\run -> f (run . unIs))
+    restoreT = Gs . restoreT
+
+-- | Monad Base Control instance.
+instance MonadBaseControl b m => MonadBaseControl b (STMGraphT m) where
+    type StM (STMGraphT m) a = ComposeSt STMGraphT m a
+    liftBaseWith = defaultLiftBaseWith
+    restoreM = defaultRestoreM
+
+-- | MonadLogger instance.
+instance (MonadLogger m) => MonadLogger (STMGraphT m) where
+   monadLoggerLog loc src lvl msg=lift $ monadLoggerLog loc src lvl msg
 
 data NameValue
     = TextP {name::T.Text,tValue:: T.Text}

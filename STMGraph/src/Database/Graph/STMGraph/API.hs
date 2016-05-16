@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Database.Graph.STMGraph.API
   ( open
@@ -9,6 +10,7 @@ module Database.Graph.STMGraph.API
   , GraphSettings(..)
   , withDatabaseIO
   , withDatabase
+  , getDatabase
 
   , nbNodes
   , nbEdges
@@ -29,9 +31,9 @@ import Database.Graph.STMGraph.APITypes
 import Database.Graph.STMGraph.Types
 import Database.Graph.STMGraph.Raw
 
-import Control.Exception
 import Control.Monad
 import Control.Monad.STM
+import Control.Monad.IO.Class (MonadIO, liftIO)
 
 import Data.Monoid
 import Data.Default
@@ -39,12 +41,12 @@ import qualified Data.Text as T
 import qualified ListT
 import qualified STMContainers.Map as SM
 import Control.Monad.Trans.State.Strict
-import Control.Monad.Trans.Class (MonadTrans(lift))
+import qualified Control.Monad.Trans.Resource as R
 
-nbNodes :: STMGraphT Int
+nbNodes :: (Monad m,MonadIO m) => STMGraphT m Int
 nbNodes = withDB $ \db-> ListT.fold (\c _->return (c+1)) 0 $ SM.stream (gdNodes $ dData db)
 
-nbEdges :: STMGraphT Int
+nbEdges :: (Monad m,MonadIO m) => STMGraphT m Int
 nbEdges  = withDB $ \db-> ListT.fold (\c _->return (c+1)) 0 $ SM.stream (gdEdges $ dData db)
 
 toPropertyValue :: NameValue -> (T.Text,PropertyValue)
@@ -59,29 +61,37 @@ toNameValue (n,PVInteger v) = IntP n v
 toNameValue (n,PVBinary v) = BinP n v
 toNameValue (n,PVJSON v) = JsonP n v
 
-withDatabaseIO ::  FilePath -> GraphSettings -> STMGraphT a -> IO a
-withDatabaseIO path gs f =
-    bracket
-        (open path gs)
-        close
-        (\db->atomically $ withDatabase db f)
+withDatabaseIO ::   (Monad m,MonadIO m,R.MonadThrow m,
+                       R.MonadBaseControl IO m) =>  FilePath -> GraphSettings -> STMGraphT (R.ResourceT m) a -> m a
+withDatabaseIO path gs f = R.runResourceT $ do
+--    bracket
+--        (open path gs)
+--        close
+--        (\db->withDatabase db f)
+  (rk,db) <- R.allocate (open path gs) close
+  res <- withDatabase db f
+  R.release rk
+  return res
 
-withDatabase :: Database -> STMGraphT a -> STM a
-withDatabase db f = evalStateT f db
+withDatabase :: (Monad m) => Database -> STMGraphT m a -> m a
+withDatabase db f = evalStateT (unIs f) db
 
-withDB :: (Database -> STM a) -> STMGraphT a
+withDB :: (Monad m,MonadIO m) => (Database -> STM a) -> STMGraphT m a
 withDB f = do
-    db <- get
-    lift $ f db
+    db <- getDatabase
+    liftIO $ atomically $ f db
 
-addNode :: T.Text -> [NameValue] -> STMGraphT NodeID
+getDatabase ::  (Monad m,MonadIO m) => STMGraphT m Database
+getDatabase = Gs get
+
+addNode :: (Monad m,MonadIO m) => T.Text -> [NameValue] -> STMGraphT m NodeID
 addNode tp props = withDB $ \db-> do
       pid <- createProperties db props
       tid <- getNodeTypeID db tp
       let obj=Node tid def def pid
       writeNode db Nothing obj
 
-removeNode :: NodeID -> STMGraphT ()
+removeNode :: (Monad m,MonadIO m) => NodeID -> STMGraphT m ()
 removeNode nid = withDB $ \db-> do
     n <- readNode db nid
     deleteProperties db $ nFirstProperty n
@@ -94,7 +104,7 @@ removeNode nid = withDB $ \db-> do
      | otherwise = removeEdges db rem =<< removeEdge' db eid rem
 
 
-nodeProperties :: NodeID -> ([NameValue] -> STM [NameValue]) -> STMGraphT [NameValue]
+nodeProperties :: (Monad m,MonadIO m) => NodeID -> ([NameValue] -> STM [NameValue]) -> STMGraphT m [NameValue]
 nodeProperties nid upd = withDB $ \db-> do
     n <- readNode db nid
     oldVals <- getNodeProperties db n
@@ -105,7 +115,7 @@ nodeProperties nid upd = withDB $ \db-> do
         void $ writeNode db (Just nid) (n{nFirstProperty=pid})
     return newVals
 
-addEdge :: NodeID -> T.Text -> [NameValue] -> NodeID -> STMGraphT EdgeID
+addEdge :: (Monad m,MonadIO m) => NodeID -> T.Text -> [NameValue] -> NodeID -> STMGraphT m EdgeID
 addEdge from tp props to = withDB $ \db-> do
   fromN<-readNode db from
   toN <- readNode db to
@@ -121,7 +131,7 @@ addEdge' db (from,fn) tp props (to,tn) = do
   writeNode db (Just to) (tn{nFirstTo=eid})
   return eid
 
-removeEdge :: EdgeID -> STMGraphT ()
+removeEdge :: (Monad m,MonadIO m) => EdgeID -> STMGraphT m ()
 removeEdge eid = withDB $ \db-> void $ removeEdge' db eid CleanBoth
 
 removeEdge' :: Database -> EdgeID -> EdgeRemoval -> STM EdgeID
@@ -164,7 +174,7 @@ removeEdge' db eid rem
                 then void $ writeEdge db (Just crid) $ setNext rel
                 else fixChain nid getNext setNext
 
-edgeProperties :: EdgeID -> ([NameValue] -> STM [NameValue]) -> STMGraphT [NameValue]
+edgeProperties :: (Monad m,MonadIO m) => EdgeID -> ([NameValue] -> STM [NameValue]) -> STMGraphT m [NameValue]
 edgeProperties eid upd = withDB $ \db->do
     e <- readEdge db eid
     oldVals <- getEdgeProperties db e
@@ -231,7 +241,7 @@ edgeHasNamedValue db e nv = do
   nvs <- getEdgeProperties db e
   return $ nv `elem` nvs
 
-traverseGraph :: Traversal -> STMGraphT Result
+traverseGraph :: (Monad m,MonadIO m) => Traversal -> STMGraphT m Result
 traverseGraph t = stateToResult <$> withDB (\db -> doTraverse db SUnknown t)
 
 
