@@ -134,7 +134,7 @@ writeGraph :: GraphMap -> IO Int
 writeGraph memGraph = withTempDB "hackage-test-stmgraph" True $ do
   --indexPackageNames <- createIndex "packageNames"
   -- _ <- addIndex $ IndexInfo "packageNames" ["Package"] ["name"]
-  pkgMap <- foldM createPackage DM.empty $ DM.keys memGraph
+  pkgMap <- foldM createPackage DM.empty $ take 2000 $ DM.keys memGraph
   mapM_ (createVersions pkgMap) $ DM.toList memGraph
   nbNodes
   where

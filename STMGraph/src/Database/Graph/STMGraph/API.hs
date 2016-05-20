@@ -86,10 +86,10 @@ getDatabase = Gs get
 
 addNode :: (Monad m,MonadIO m) => T.Text -> [NameValue] -> STMGraphT m NodeID
 addNode tp props = withDB $ \db-> do
-      pid <- createProperties db props
-      tid <- getNodeTypeID db tp
-      let obj=Node tid def def pid
-      writeNode db Nothing obj
+          pid <- createProperties db props
+          tid <- getNodeTypeID db tp
+          let obj=Node tid def def pid
+          writeNode db Nothing obj
 
 removeNode :: (Monad m,MonadIO m) => NodeID -> STMGraphT m ()
 removeNode nid = withDB $ \db-> do
@@ -116,10 +116,10 @@ nodeProperties nid upd = withDB $ \db-> do
     return newVals
 
 addEdge :: (Monad m,MonadIO m) => NodeID -> T.Text -> [NameValue] -> NodeID -> STMGraphT m EdgeID
-addEdge from tp props to = withDB $ \db-> do
-  fromN<-readNode db from
-  toN <- readNode db to
-  addEdge' db (from,fromN) tp props (to,toN)
+addEdge from tp props to =  withDB $ \db-> do
+          fromN<-readNode db from
+          toN <- readNode db to
+          addEdge' db (from,fromN) tp props (to,toN)
 
 addEdge' :: Database -> (NodeID,Node) -> T.Text -> [NameValue] -> (NodeID,Node) -> STM EdgeID
 addEdge' db (from,fn) tp props (to,tn) = do

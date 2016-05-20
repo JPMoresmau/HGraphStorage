@@ -15,10 +15,10 @@ import Foreign.Storable
 import Foreign.Ptr
 import Data.Int
 import Control.Concurrent.MVar
-import qualified Data.ByteString.Lazy                   as BS
+import qualified Data.ByteString                  as BS
 import Data.Word
 import Control.Monad
-
+import Data.ByteString.Unsafe
 
 -- | A Handle to a Mmapped file
 data MMapHandle a = MMapHandle
@@ -87,6 +87,19 @@ pokeMMBS mm a sz
           h2_ <- extendMM h_ (mhName mm) full
           fp (mhPtr h2_)
           return h2_
+--    copy (ptrTgt,ptrOrig) _ = do
+--       w <- peek ptrOrig
+--       poke ptrTgt w
+--       return (plusPtr ptrTgt szw,plusPtr ptrOrig szw)
+--    fp ptrTgt ptrOrig len = foldM copy (ptrTgt,ptrOrig) [1..len]
+--    p h_ = unsafeUseAsCStringLen a (\(ptr,len) -> do
+--                let full= sz+len
+--                h2_<- if inBounds h_ full
+--                            then return h_
+--                            else extendMM h_ (mhName mm) full
+--                fp (plusPtr (mhPtr h2_) sz) ptr len
+--                return h2_
+--        )
 
 -- | Extend the pointer range to include the given index
 extendMM :: (Storable a) => MMapHandle_ a -> FilePath -> Int -> IO (MMapHandle_ a)

@@ -23,12 +23,13 @@ import Database.Graph.STMGraph.Types
 
 import Data.Default
 import qualified Data.Map                               as DM
-
+import qualified Data.HashMap.Strict                               as HM
 import Control.Concurrent.Async
 import Control.Monad.STM
 import qualified STMContainers.Map as SM
 import Control.Concurrent.STM.TVar
 import qualified Data.Aeson as A
+import Data.Hashable
 
 spec :: Spec
 spec = do
@@ -36,9 +37,9 @@ spec = do
     it "serializes models correctly" $ property $
         \x -> (stringToModel . modelToString) x == x
     it "lookups to names correctly" $ property $
-        \(a::String) (b::Int) -> DM.lookup a (toName $ addToLookup a b def) == Just b
+        \(a::String) (b::Int) -> HM.lookup a (toName $ addToLookup a b def) == Just b
     it "lookups from names correctly" $ property $
-        \(a::String) (b::Int) -> DM.lookup b (fromName $ addToLookup a b def) == Just a
+        \(a::String) (b::Int) -> HM.lookup b (fromName $ addToLookup a b def) == Just a
     it "generates ID correctly" $ do
         ig <- atomically $ newTVar $ newIDGen 1
         i1 <- atomically $ nextID ig 1
@@ -76,7 +77,7 @@ spec = do
     it "serializes values correctly" $ property $
         \x -> (toValue (valueType x) (toBin x)) == x
 
-instance (Ord a, Ord b,Arbitrary a, Arbitrary b)=> Arbitrary (Lookup a b) where
+instance (Eq a,Hashable a, Eq b, Hashable b,Arbitrary a, Arbitrary b)=> Arbitrary (Lookup a b) where
   arbitrary = lookupFromList <$> arbitrary
 
 instance Arbitrary Model where

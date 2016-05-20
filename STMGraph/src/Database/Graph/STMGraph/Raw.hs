@@ -48,14 +48,15 @@ import Foreign.Storable
 import System.Directory
 import System.FilePath
 import System.IO
-import qualified Data.ByteString.Lazy  as BS
+import qualified Data.ByteString  as BS
 import Control.Concurrent
 import Control.Concurrent.STM.TVar
 import Control.Monad
 import Control.Monad.STM
 import Control.Concurrent.STM.TQueue
 import qualified STMContainers.Map as SM
-import qualified Data.Map                               as DM
+import qualified Data.Map.Strict                               as DM
+import qualified Data.HashMap.Strict                               as HM
 import qualified Data.Text as T
 import Foreign.Marshal.Alloc
 import Foreign.Ptr
@@ -63,22 +64,22 @@ import Foreign.Ptr
 open :: FilePath -> GraphSettings -> IO Database
 open dir gs = do
     createDirectoryIfMissing True dir
---    if gsUseMMap gs
---        then
---          MMHandles
---            <$> getMMHandle NodeFile
---            <*> getMMHandle EdgeFile
---            <*> getMMHandle propertyFile
---            <*> getMMHandle propertyValuesFile
---            <*> pure (dir </> modelFile)
---        else
     mv <- newEmptyMVar
-    hs <-     Handles
-            <$> getHandle nodeFile
-            <*> getHandle edgeFile
-            <*> getHandle propertyFile
-            <*> getHandle propertyValuesFile
-            <*> pure (dir </> modelFile)
+    hs<- if gsUseMMap gs
+                then
+                  MMHandles
+                    <$> getMMHandle nodeFile
+                    <*> getMMHandle edgeFile
+                    <*> getMMHandle propertyFile
+                    <*> getMMHandle propertyValuesFile
+                    <*> pure (dir </> modelFile)
+                else
+                 Handles
+                    <$> getHandle nodeFile
+                    <*> getHandle edgeFile
+                    <*> getHandle propertyFile
+                    <*> getHandle propertyValuesFile
+                    <*> pure (dir </> modelFile)
     db <- load hs mv
     startWriter hs (dWrites db) mv
     return db
@@ -107,9 +108,9 @@ checkpoint Database{..} = do
 
 
 load :: Handles -> MVar() -> IO Database
-load h@Handles{..} mv = do
-        exm <- doesFileExist hModel
-        mdl <- if exm then stringToModel <$> readFile hModel else def
+load h mv = do
+        exm <- doesFileExist (hModel h)
+        mdl <- if exm then stringToModel <$> readFile (hModel h) else def
         db <- atomically $ do
             db<- newDatabase mv
             writeTVar (mdModel $ dMetadata db) mdl
@@ -121,8 +122,11 @@ load h@Handles{..} mv = do
         return db
 
 loadNodes :: Handles -> Database -> Ptrs ->  IO()
-loadNodes Handles{..} Database{..} Ptrs{..}= foldAllGeneric hNodes ptrsNodes addNode addNodeID
-    where
+loadNodes h Database{..} Ptrs{..}=
+    case h of
+        Handles{..} -> foldAllGeneric hNodes ptrsNodes addNode addNodeID
+        MMHandles{..}->foldAllGenericMM mhNodes (snd ptrsNodes) addNode addNodeID 10 -- FIXME, need to have max id
+  where
         addNode (i,o) = atomically $ do
             SM.insert o i (gdNodes dData)
             modifyTVar'  (mdGenNodeID dMetadata) (\g->g{maxID=i})
@@ -131,8 +135,11 @@ loadNodes Handles{..} Database{..} Ptrs{..}= foldAllGeneric hNodes ptrsNodes add
             return ()
 
 loadEdges :: Handles -> Database -> Ptrs -> IO()
-loadEdges Handles{..} Database{..} Ptrs{..} = void $ foldAllGeneric hEdges ptrsEdges addEdge addEdgeID
-    where
+loadEdges h Database{..} Ptrs{..} =
+     case h of
+        Handles{..} -> foldAllGeneric hEdges ptrsEdges addEdge addEdgeID
+        MMHandles{..}->foldAllGenericMM mhEdges (snd ptrsEdges) addEdge addEdgeID 10 -- FIXME, need to have max id
+   where
         addEdge (i,o) = atomically $ do
             SM.insert o i (gdEdges dData)
             modifyTVar'  (mdGenEdgeID dMetadata) (\g->g{maxID=i})
@@ -141,10 +148,13 @@ loadEdges Handles{..} Database{..} Ptrs{..} = void $ foldAllGeneric hEdges ptrsE
             return ()
 
 loadProperties :: Handles -> Model -> Database -> Ptrs -> IO()
-loadProperties h@Handles{..} mdl Database{..} Ptrs{..} = void $ foldAllGeneric hProperties ptrsProperties addProperty addPropertyID
-    where
+loadProperties h mdl Database{..} Ptrs{..} =
+    case h of
+        Handles{..} -> foldAllGeneric hProperties ptrsProperties addProperty addPropertyID
+        MMHandles{..} -> foldAllGenericMM mhProperties (snd ptrsProperties) addProperty addPropertyID 10 -- FIXME, need to have max id
+  where
         addProperty (i,o) = do
-            let mt = DM.lookup (pType o) $ toName $ mPropertyTypes mdl
+            let mt = HM.lookup (pType o) $ toName $ mPropertyTypes mdl
             case mt of
                 Nothing -> void $ atomically $ freeID i 1 (mdGenPropertyID dMetadata)
                 Just (_,t) -> do
@@ -167,6 +177,7 @@ readPropertyValue Handles{..} dt off len = do
   let h = hPropertyValues
   hSeek h AbsoluteSeek (fromIntegral off)
   toValue dt <$> BS.hGet h (fromIntegral len)
+readPropertyValue MMHandles{..} dt off len = toValue dt <$> peekMMBS mhPropertyValues (fromIntegral off) (fromIntegral len)
 
 -- | Read all binary Nodes from a given handle, generating their IDs from their offset
 --foldAllGeneric
@@ -209,6 +220,26 @@ foldAllGeneric h (ptr,sz) f1 f2 = do
                          else f1 (i,b)
                 go i
 
+-- | Read all binary objects from a given mmap handle, generating their IDs from their offset
+foldAllGenericMM
+  :: (Integral a, Eq b, Storable b, Default b)
+  => MMapHandle b -> Int
+  -> ((a,b) -> IO ()) -- ^ callback on item
+  -> (a -> IO ()) -- ^ callback on empty
+  -> a
+  -> IO ()
+foldAllGenericMM h sz f1 f2 maxID =
+  go 0
+  where go a = do
+            b <- peekMM h (fromIntegral a*sz)
+            let i = a + 1
+            if b == def
+                     then f2 i
+                     else f1 (i,b)
+            if i >= maxID
+              then return ()
+              else  go i
+
 writer :: Handles -> TQueue WriteEvent  -> Ptrs -> IO ()
 writer hs@Handles{..} tc ptrs@Ptrs{..} = do
     e <- atomically $ readTQueue tc
@@ -237,6 +268,28 @@ writer hs@Handles{..} tc ptrs@Ptrs{..} = do
         handle (DeletedNode oid) = writeGeneric hNodes ptrsNodes oid (def::Node)
         handle (DeletedEdge rid) = writeGeneric hEdges ptrsEdges rid (def::Edge)
         handle (DeletedProperty pid) = writeGeneric hProperties ptrsProperties pid (def::Property)
+writer hs@MMHandles{..} tc ptrs@Ptrs{..} = do
+    e <- atomically $ readTQueue tc
+    handle e
+    unless (e == ClosedDatabase) $ writer hs tc ptrs
+    where
+        handle ClosedDatabase = do
+            closeMmap mhNodes
+            closeMmap mhEdges
+            closeMmap mhProperties
+            closeMmap mhPropertyValues
+            return ()
+        handle (Checkpoint mv) = do
+            putMVar mv ()
+        handle (WrittenModel mdl) = writeFile hModel (modelToString mdl)
+        handle (WrittenNode oid obj) = writeGenericMM mhNodes ptrsNodes oid obj
+        handle (WrittenEdge rid rel) = writeGenericMM mhEdges ptrsEdges rid rel
+        handle (WrittenProperty pid (pro,val)) = do
+            writeGenericMM mhProperties ptrsProperties pid pro
+            pokeMMBS mhPropertyValues val (fromIntegral $ pOffset pro)
+        handle (DeletedNode oid) = writeGenericMM mhNodes ptrsNodes oid (def::Node)
+        handle (DeletedEdge rid) = writeGenericMM mhEdges ptrsEdges rid (def::Edge)
+        handle (DeletedProperty pid) = writeGenericMM mhProperties ptrsProperties pid (def::Property)
 
 data Ptrs = Ptrs
     { ptrsNodes :: (Ptr Node, Int)
@@ -266,6 +319,10 @@ writeGeneric h (ptr,sz) a b =  do
     poke ptr b
     hPutBuf h ptr sz
 
+writeGenericMM :: (Integral a, Storable b) => MMapHandle b -> (Ptr b, Int) -> a-> b -> IO ()
+writeGenericMM h (_,sz) a b =  do
+    pokeMM h b (fromIntegral (a - 1) * sz)
+
 updateModel ::  (Model -> Model) -> Database ->STM ()
 updateModel upd db = do
     let tv = mdModel $ dMetadata db
@@ -282,14 +339,12 @@ getPropertyTypeID :: Database -> (T.Text,DataType) -> STM PropertyTypeID
 getPropertyTypeID db p = do
   let tv = mdModel $ dMetadata db
   mdl <- readTVar tv
-  let mptid = DM.lookup p $ fromName $ mPropertyTypes mdl
+  let mptid = HM.lookup p $ fromName $ mPropertyTypes mdl
   case mptid of
     Just ptid -> return ptid
     Nothing -> do
       let ns = toName $ mPropertyTypes mdl
-          ptid = if DM.null ns
-                  then 1
-                  else fst (DM.findMax ns)+1
+          ptid = fromIntegral $ (HM.size ns)+1
 
       updateModel (\m->
           let pts2= addToLookup ptid p $ mPropertyTypes m
@@ -301,20 +356,18 @@ getPropertyType :: Database -> PropertyTypeID -> STM (Maybe (T.Text,DataType))
 getPropertyType db ptid = do
     let tv = mdModel $ dMetadata db
     mdl <- readTVar tv
-    return $ DM.lookup ptid $ toName $ mPropertyTypes mdl
+    return $ HM.lookup ptid $ toName $ mPropertyTypes mdl
 
 getNodeTypeID :: Database -> T.Text -> STM NodeTypeID
 getNodeTypeID db n = do
   let tv = mdModel $ dMetadata db
   mdl <- readTVar tv
-  let mptid = DM.lookup n $ fromName $ mNodeTypes mdl
+  let mptid = HM.lookup n $ fromName $ mNodeTypes mdl
   case mptid of
     Just ptid -> return ptid
     Nothing -> do
       let ns = toName $ mNodeTypes mdl
-          ptid = if DM.null ns
-                  then 1
-                  else fst (DM.findMax ns)+1
+          ptid = fromIntegral $  (HM.size ns)+1
 
       updateModel (\m->
           let pts2= addToLookup ptid n $ mNodeTypes m
@@ -326,20 +379,18 @@ getNodeType :: Database -> NodeTypeID -> STM (Maybe T.Text)
 getNodeType db ntid = do
     let tv = mdModel $ dMetadata db
     mdl <- readTVar tv
-    return $ DM.lookup ntid $ toName $ mNodeTypes mdl
+    return $ HM.lookup ntid $ toName $ mNodeTypes mdl
 
 getEdgeTypeID :: Database -> T.Text -> STM NodeTypeID
 getEdgeTypeID db n = do
   let tv = mdModel $ dMetadata db
   mdl <- readTVar tv
-  let mptid = DM.lookup n $ fromName $ mEdgeTypes mdl
+  let mptid = HM.lookup n $ fromName $ mEdgeTypes mdl
   case mptid of
     Just ptid -> return ptid
     Nothing -> do
       let ns = toName $ mEdgeTypes mdl
-          ptid = if DM.null ns
-                  then 1
-                  else fst (DM.findMax ns)+1
+          ptid = fromIntegral $ (HM.size ns)+1
 
       updateModel (\m->
           let pts2= addToLookup ptid n $ mEdgeTypes m
@@ -351,7 +402,7 @@ getEdgeType :: Database -> EdgeTypeID -> STM (Maybe T.Text)
 getEdgeType db etid = do
     let tv = mdModel $ dMetadata db
     mdl <- readTVar tv
-    return $ DM.lookup etid $ toName $ mEdgeTypes mdl
+    return $ HM.lookup etid $ toName $ mEdgeTypes mdl
 
 readNode :: Database ->NodeID -> STM Node
 readNode db oid = fromMaybe def <$> SM.lookup oid (gdNodes $ dData db)
@@ -398,7 +449,7 @@ readProperty db oid = fromMaybe def <$> SM.lookup oid (gdProperties $ dData db)
 writeProperty :: Database -> Maybe PropertyID -> ((PropertyTypeID,PropertyID),PropertyValue) -> STM PropertyID
 writeProperty db mid ((tid,next),v) = do
         let bs= toBin v
-        let l = BS.length bs
+        let l = fromIntegral $ BS.length bs
         (i,off) <- getID mid l
         let p= Property tid next off l
         SM.insert (p,v) i $ gdProperties $ dData db

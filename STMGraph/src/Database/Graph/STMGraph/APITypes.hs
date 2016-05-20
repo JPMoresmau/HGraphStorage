@@ -38,7 +38,7 @@ import qualified Control.Monad.Trans.Resource as R
 
 import Data.Default
 import qualified Data.Text as T
-import qualified Data.ByteString.Lazy as BS
+import qualified Data.ByteString as BS
 import qualified Data.Aeson as A
 import Data.Typeable
 import qualified Data.Set as S

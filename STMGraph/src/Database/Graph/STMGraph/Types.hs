@@ -28,10 +28,12 @@ import             Data.Binary
 import Foreign.Storable.Record  as Store
 import Data.Typeable
 import GHC.Generics
-import qualified Data.ByteString.Lazy as BS
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as BSL
 import Data.Text.Encoding (decodeUtf8, encodeUtf8)
 import qualified Data.Text as T
-import qualified Data.Map                               as DM
+import qualified Data.Map.Strict                               as DM
+import qualified Data.HashMap.Strict                               as HM
 import qualified STMContainers.Map as SM
 import Control.Concurrent
 import Control.Concurrent.STM.TVar
@@ -39,6 +41,7 @@ import Control.Monad.STM
 import Control.Concurrent.STM.TQueue
 import           System.IO
 import qualified Data.Aeson as A
+import Data.Hashable
 
 -- | IDs for Nodes
 type NodeID       = Int64
@@ -111,7 +114,7 @@ nodeSize = binLength (def::Node)
 
 -- | Calculates the length of the binary serialization of the given Node
 binLength :: (Binary b) => b -> Int64
-binLength = BS.length . encode
+binLength = BSL.length . encode
 
 -- | A Edge as represented in the Edge file
 data Edge = Edge
@@ -211,6 +214,9 @@ propertySize = binLength (def::Property)
 data DataType = DTText | DTInteger | DTBinary | DTJSON
   deriving (Show,Read,Eq,Ord,Bounded,Enum,Typeable)
 
+instance Hashable DataType where
+    hashWithSalt i dt=hashWithSalt i (fromEnum dt)
+
 -- | Convert a DataType Node to its ID
 dataTypeID :: DataType -> DataTypeID
 dataTypeID = fromIntegral . fromEnum
@@ -240,16 +246,16 @@ valueType (PVJSON _) = DTJSON
 -- | Convert a property value to a bytestring
 toBin :: PropertyValue -> BS.ByteString
 toBin (PVBinary bs) = bs
-toBin (PVText t) = BS.fromStrict $ encodeUtf8 t
-toBin (PVInteger i) = encode i
-toBin (PVJSON j) = A.encode j
+toBin (PVText t) =encodeUtf8 t -- BS.fromStrict $
+toBin (PVInteger i) = BSL.toStrict $ encode i
+toBin (PVJSON j) =BSL.toStrict $ A.encode j
 
 -- | Convert a bytestring to a propertyvalue
 toValue :: DataType -> BS.ByteString -> PropertyValue
 toValue DTBinary  = PVBinary
-toValue DTText    = PVText . decodeUtf8 . BS.toStrict
-toValue DTInteger = PVInteger . decode
-toValue DTJSON    = PVJSON . fm . A.decode
+toValue DTText    = PVText . decodeUtf8 -- . BS.toStrict
+toValue DTInteger = PVInteger . decode . BSL.fromStrict
+toValue DTJSON    = PVJSON . fm . A.decode .  BSL.fromStrict
   where
       fm (Just r)= r
       fm _ = error "Typed.toValue: cannot parse JSON value"
@@ -277,42 +283,42 @@ data EdgeType = EdgeType
 
 -- | A lookup table allowing two ways lookup
 data Lookup a b = Lookup
-  { fromName :: DM.Map b a
-  , toName   :: DM.Map a b
-  } deriving (Show,Read,Eq,Ord,Typeable)
+  { fromName :: HM.HashMap b a
+  , toName   :: HM.HashMap a b
+  } deriving (Show,Read,Eq,Typeable)
 
 -- | Default instance (empty tables)
 instance Default (Lookup a b) where
-  def = Lookup DM.empty DM.empty
+  def = Lookup HM.empty HM.empty
 
 -- | Add to the lookup maps
-addToLookup :: (Ord a, Ord b) => a -> b -> Lookup a b -> Lookup a b
-addToLookup a b (Lookup fn tn) = Lookup (DM.insert b a fn) (DM.insert a b tn)
+addToLookup :: (Eq a,Hashable a, Eq b,Hashable b) => a -> b -> Lookup a b -> Lookup a b
+addToLookup a b (Lookup fn tn) = Lookup (HM.insert b a fn) (HM.insert a b tn)
 
-lookupFromList :: (Ord a, Ord b) => [(a,b)] -> Lookup a b
+lookupFromList :: (Eq a,Hashable a, Eq b,Hashable b) => [(a,b)] -> Lookup a b
 lookupFromList  = foldr go def
     where
         -- ensure duplicates in list don't cause issues
         go (a,b) (Lookup fn tn) = let
-            ma1 = DM.lookup b fn
-            mb1 = DM.lookup a tn
+            ma1 = HM.lookup b fn
+            mb1 = HM.lookup a tn
             tn2 = rm ma1 tn
             fn2 = rm mb1 fn
-            in Lookup (DM.insert b a fn2) (DM.insert a b tn2)
+            in Lookup (HM.insert b a fn2) (HM.insert a b tn2)
         rm Nothing m = m
-        rm (Just a) m = DM.delete a m
+        rm (Just a) m = HM.delete a m
 
 
 data Model = Model
   { mNodeTypes   :: Lookup NodeTypeID T.Text
   , mEdgeTypes :: Lookup EdgeTypeID T.Text
   , mPropertyTypes :: Lookup PropertyTypeID (T.Text,DataType)
-  } deriving (Show,Read,Eq,Ord,Typeable,Generic)
+  } deriving (Show,Read,Eq,Typeable,Generic)
 
 modelToString :: Model -> String
-modelToString Model{..} = show (DM.toAscList $ toName mNodeTypes,
-    DM.toAscList $ toName mEdgeTypes,
-    DM.toAscList $ toName mPropertyTypes)
+modelToString Model{..} = show (HM.toList $ toName mNodeTypes,
+    HM.toList $ toName mEdgeTypes,
+    HM.toList $ toName mPropertyTypes)
 
 stringToModel :: String -> Model
 stringToModel s
@@ -492,13 +498,13 @@ data Handles =  Handles
   , hPropertyValues :: Handle
   , hModel :: FilePath
   } -- ^ Direct Handles
---  |  MMHandles
---  { mhNodes        :: MMapHandle Node
---  , mhEdges      :: MMapHandle Edge
---  , mhProperties     :: MMapHandle Property
---  , mhPropertyValues :: MMapHandle Word8
---  , hModel :: FilePath
---  } -- ^ MMap Handles
+  |  MMHandles
+  { mhNodes        :: MMapHandle Node
+  , mhEdges      :: MMapHandle Edge
+  , mhProperties     :: MMapHandle Property
+  , mhPropertyValues :: MMapHandle Word8
+  , hModel :: FilePath
+  } -- ^ MMap Handles
 
 -- | Settings for the Graph DB
 data GraphSettings = GraphSettings
