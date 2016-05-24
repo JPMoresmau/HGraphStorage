@@ -43,11 +43,14 @@ import qualified STMContainers.Map as SM
 import Control.Monad.Trans.State.Strict
 import qualified Control.Monad.Trans.Resource as R
 
-nbNodes :: (Monad m,MonadIO m) => STMGraphT m Int
-nbNodes = withDB $ \db-> ListT.fold (\c _->return (c+1)) 0 $ SM.stream (gdNodes $ dData db)
+import Control.Concurrent.STM.TVar
+import Data.Int
 
-nbEdges :: (Monad m,MonadIO m) => STMGraphT m Int
-nbEdges  = withDB $ \db-> ListT.fold (\c _->return (c+1)) 0 $ SM.stream (gdEdges $ dData db)
+nbNodes :: (Monad m,MonadIO m) => STMGraphT m Int64
+nbNodes = withDB $ \db-> cNodes <$> readTVar (mdCounts $ dMetadata db)
+
+nbEdges :: (Monad m,MonadIO m) => STMGraphT m Int64
+nbEdges  = withDB $ \db-> cEdges <$> readTVar (mdCounts $ dMetadata db)
 
 toPropertyValue :: NameValue -> (T.Text,PropertyValue)
 toPropertyValue (TextP n v)=(n,PVText v)
@@ -70,6 +73,7 @@ withDatabaseIO path gs f = R.runResourceT $ do
 --        (\db->withDatabase db f)
   (rk,db) <- R.allocate (open path gs) close
   res <- withDatabase db f
+  liftIO $ checkpoint db
   R.release rk
   return res
 

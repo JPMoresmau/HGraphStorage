@@ -72,6 +72,7 @@ open dir gs = do
                     <*> getMMHandle edgeFile
                     <*> getMMHandle propertyFile
                     <*> getMMHandle propertyValuesFile
+                    <*> getMMHandle countsFile
                     <*> pure (dir </> modelFile)
                 else
                  Handles
@@ -79,6 +80,7 @@ open dir gs = do
                     <*> getHandle edgeFile
                     <*> getHandle propertyFile
                     <*> getHandle propertyValuesFile
+                    <*> getHandle countsFile
                     <*> pure (dir </> modelFile)
     db <- load hs mv
     startWriter hs (dWrites db) mv
@@ -97,13 +99,13 @@ open dir gs = do
 
 close :: Database -> IO ()
 close Database{..} = do
-    atomically $ writeTQueue dWrites ClosedDatabase
+    atomically $ writeTQueue dWrites [ClosedDatabase]
     takeMVar dWriterThread
 
 checkpoint :: Database -> IO ()
 checkpoint Database{..} = do
     mv <- newEmptyMVar
-    atomically $ writeTQueue dWrites (Checkpoint mv)
+    atomically $ writeTQueue dWrites [Checkpoint mv]
     takeMVar mv
 
 
@@ -111,21 +113,27 @@ load :: Handles -> MVar() -> IO Database
 load h mv = do
         exm <- doesFileExist (hModel h)
         mdl <- if exm then stringToModel <$> readFile (hModel h) else def
+        cnts <- readCounts h
         db <- atomically $ do
             db<- newDatabase mv
             writeTVar (mdModel $ dMetadata db) mdl
+            writeTVar (mdCounts $ dMetadata db) cnts
             return db
         withPtrs $ \ptrs-> do
-            loadNodes h db ptrs
-            loadEdges h db ptrs
-            loadProperties h mdl db ptrs
+            loadNodes h db ptrs cnts
+            loadEdges h db ptrs cnts
+            loadProperties h mdl db ptrs cnts
         return db
 
-loadNodes :: Handles -> Database -> Ptrs ->  IO()
-loadNodes h Database{..} Ptrs{..}=
+readCounts :: Handles -> IO Counts
+readCounts Handles{..} = allocaBytes (fromIntegral countsSize) $ \ptr-> hGetBuf hCounts ptr 0 >> peek ptr
+readCounts MMHandles{..} = peekMM mhCounts 0
+
+loadNodes :: Handles -> Database -> Ptrs -> Counts -> IO()
+loadNodes h Database{..} Ptrs{..} cnts=
     case h of
         Handles{..} -> foldAllGeneric hNodes ptrsNodes addNode addNodeID
-        MMHandles{..}->foldAllGenericMM mhNodes (snd ptrsNodes) addNode addNodeID 10 -- FIXME, need to have max id
+        MMHandles{..}->foldAllGenericMM mhNodes (snd ptrsNodes) addNode addNodeID (cNodes cnts)
   where
         addNode (i,o) = atomically $ do
             SM.insert o i (gdNodes dData)
@@ -134,11 +142,11 @@ loadNodes h Database{..} Ptrs{..}=
             freeID i 1 (mdGenNodeID dMetadata)
             return ()
 
-loadEdges :: Handles -> Database -> Ptrs -> IO()
-loadEdges h Database{..} Ptrs{..} =
+loadEdges :: Handles -> Database -> Ptrs -> Counts -> IO()
+loadEdges h Database{..} Ptrs{..} cnts =
      case h of
         Handles{..} -> foldAllGeneric hEdges ptrsEdges addEdge addEdgeID
-        MMHandles{..}->foldAllGenericMM mhEdges (snd ptrsEdges) addEdge addEdgeID 10 -- FIXME, need to have max id
+        MMHandles{..}->foldAllGenericMM mhEdges (snd ptrsEdges) addEdge addEdgeID (cEdges cnts)
    where
         addEdge (i,o) = atomically $ do
             SM.insert o i (gdEdges dData)
@@ -147,11 +155,11 @@ loadEdges h Database{..} Ptrs{..} =
             freeID i 1 (mdGenEdgeID dMetadata)
             return ()
 
-loadProperties :: Handles -> Model -> Database -> Ptrs -> IO()
-loadProperties h mdl Database{..} Ptrs{..} =
+loadProperties :: Handles -> Model -> Database -> Ptrs -> Counts -> IO()
+loadProperties h mdl Database{..} Ptrs{..} cnts =
     case h of
         Handles{..} -> foldAllGeneric hProperties ptrsProperties addProperty addPropertyID
-        MMHandles{..} -> foldAllGenericMM mhProperties (snd ptrsProperties) addProperty addPropertyID 10 -- FIXME, need to have max id
+        MMHandles{..} -> foldAllGenericMM mhProperties (snd ptrsProperties) addProperty addPropertyID (cProperties cnts)
   where
         addProperty (i,o) = do
             let mt = HM.lookup (pType o) $ toName $ mPropertyTypes mdl
@@ -226,25 +234,27 @@ foldAllGenericMM
   => MMapHandle b -> Int
   -> ((a,b) -> IO ()) -- ^ callback on item
   -> (a -> IO ()) -- ^ callback on empty
-  -> a
+  -> Int64
   -> IO ()
-foldAllGenericMM h sz f1 f2 maxID =
+foldAllGenericMM h sz f1 f2 cnt =
   go 0
-  where go a = do
+  where
+    cntA = fromIntegral cnt
+    go a = do
             b <- peekMM h (fromIntegral a*sz)
             let i = a + 1
-            if b == def
-                     then f2 i
-                     else f1 (i,b)
-            if i >= maxID
+            i <- if b == def
+                     then f2 i >> return a
+                     else f1 (i,b) >> return (a+1)
+            if i >= cntA
               then return ()
               else  go i
 
-writer :: Handles -> TQueue WriteEvent  -> Ptrs -> IO ()
+writer :: Handles -> TQueue [WriteEvent]  -> Ptrs -> IO ()
 writer hs@Handles{..} tc ptrs@Ptrs{..} = do
     e <- atomically $ readTQueue tc
-    handle e
-    unless (e == ClosedDatabase) $ writer hs tc ptrs
+    mapM handle e
+    unless (last e == ClosedDatabase) $ writer hs tc ptrs
     where
         handle ClosedDatabase = do
             hClose hNodes
@@ -259,6 +269,9 @@ writer hs@Handles{..} tc ptrs@Ptrs{..} = do
             hFlush hPropertyValues
             putMVar mv ()
         handle (WrittenModel mdl) = writeFile hModel (modelToString mdl)
+        handle (WrittenCounts cnts) = allocaBytes (fromIntegral countsSize) $ \ptr-> do
+            poke ptr cnts
+            hPutBuf hCounts ptr 0
         handle (WrittenNode oid obj) = writeGeneric hNodes ptrsNodes oid obj
         handle (WrittenEdge rid rel) = writeGeneric hEdges ptrsEdges rid rel
         handle (WrittenProperty pid (pro,val)) = do
@@ -270,8 +283,8 @@ writer hs@Handles{..} tc ptrs@Ptrs{..} = do
         handle (DeletedProperty pid) = writeGeneric hProperties ptrsProperties pid (def::Property)
 writer hs@MMHandles{..} tc ptrs@Ptrs{..} = do
     e <- atomically $ readTQueue tc
-    handle e
-    unless (e == ClosedDatabase) $ writer hs tc ptrs
+    mapM handle e
+    unless (last e == ClosedDatabase) $ writer hs tc ptrs
     where
         handle ClosedDatabase = do
             closeMmap mhNodes
@@ -282,6 +295,7 @@ writer hs@MMHandles{..} tc ptrs@Ptrs{..} = do
         handle (Checkpoint mv) = do
             putMVar mv ()
         handle (WrittenModel mdl) = writeFile hModel (modelToString mdl)
+        handle (WrittenCounts cnts) = pokeMM mhCounts cnts 0
         handle (WrittenNode oid obj) = writeGenericMM mhNodes ptrsNodes oid obj
         handle (WrittenEdge rid rel) = writeGenericMM mhEdges ptrsEdges rid rel
         handle (WrittenProperty pid (pro,val)) = do
@@ -330,7 +344,7 @@ updateModel upd db = do
     let mdl2 = upd mdl
     when (mdl2 /= mdl) $ do
       writeTVar tv $! mdl2
-      writeTQueue (dWrites db) (WrittenModel mdl2)
+      writeTQueue (dWrites db) [WrittenModel mdl2]
 
 getModel :: Database -> STM Model
 getModel db = readTVar $ mdModel $ dMetadata db
@@ -411,7 +425,15 @@ writeNode :: Database -> Maybe NodeID -> Node -> STM NodeID
 writeNode db mid o = do
         i <- getID mid
         SM.insert o i $ gdNodes $ dData db
-        writeTQueue (dWrites db) (WrittenNode i o)
+        let evts = [WrittenNode i o]
+        evts2 <- if isNothing mid
+                then do
+                    cnts <- readTVar (mdCounts $ dMetadata db)
+                    let cnts2 = cnts{cNodes=cNodes cnts + 1}
+                    writeTVar (mdCounts $ dMetadata db) cnts2
+                    return $ evts ++ [WrittenCounts cnts2]
+                else return evts
+        writeTQueue (dWrites db) evts2
         return i
     where
         getID (Just i)= return i
@@ -421,8 +443,10 @@ deleteNode :: Database -> NodeID -> STM ()
 deleteNode db oid = do
     freeID oid 1 (mdGenNodeID $ dMetadata db)
     SM.delete oid $ gdNodes $ dData db
-    writeTQueue (dWrites db) (DeletedNode oid)
-
+    cnts <- readTVar (mdCounts $ dMetadata db)
+    let cnts2 = cnts{cNodes=cNodes cnts -1}
+    writeTVar (mdCounts $ dMetadata db) cnts2
+    writeTQueue (dWrites db) [DeletedNode oid,WrittenCounts cnts2]
 
 readEdge :: Database ->EdgeID -> STM Edge
 readEdge db oid = fromMaybe def <$> SM.lookup oid (gdEdges $ dData db)
@@ -431,7 +455,15 @@ writeEdge :: Database -> Maybe EdgeID -> Edge -> STM EdgeID
 writeEdge db mid o = do
         i <- getID mid
         SM.insert o i $ gdEdges $ dData db
-        writeTQueue (dWrites db) (WrittenEdge i o)
+        let evts = [WrittenEdge i o]
+        evts2 <- if isNothing mid
+                then do
+                    cnts <- readTVar (mdCounts $ dMetadata db)
+                    let cnts2 = cnts{cEdges=cEdges cnts + 1}
+                    writeTVar (mdCounts $ dMetadata db) cnts2
+                    return $ evts ++ [WrittenCounts cnts2]
+                else return evts
+        writeTQueue (dWrites db) evts2
         return i
     where
         getID (Just i)= return i
@@ -441,7 +473,10 @@ deleteEdge :: Database -> EdgeID -> STM ()
 deleteEdge db oid = do
     freeID oid 1 (mdGenEdgeID $ dMetadata db)
     SM.delete oid $ gdEdges $ dData db
-    writeTQueue (dWrites db) (DeletedEdge oid)
+    cnts <- readTVar (mdCounts $ dMetadata db)
+    let cnts2 = cnts{cEdges=cEdges cnts -1}
+    writeTVar (mdCounts $ dMetadata db) cnts2
+    writeTQueue (dWrites db) [DeletedEdge oid,WrittenCounts cnts2]
 
 readProperty :: Database ->PropertyID -> STM (Property,PropertyValue)
 readProperty db oid = fromMaybe def <$> SM.lookup oid (gdProperties $ dData db)
@@ -453,7 +488,15 @@ writeProperty db mid ((tid,next),v) = do
         (i,off) <- getID mid l
         let p= Property tid next off l
         SM.insert (p,v) i $ gdProperties $ dData db
-        writeTQueue (dWrites db) (WrittenProperty i (p,bs))
+        let evts = [WrittenProperty i (p,bs)]
+        evts2 <- if isNothing mid
+                then do
+                    cnts <- readTVar (mdCounts $ dMetadata db)
+                    let cnts2 = cnts{cProperties=cProperties cnts + 1}
+                    writeTVar (mdCounts $ dMetadata db) cnts2
+                    return $ evts ++ [WrittenCounts cnts2]
+                else return evts
+        writeTQueue (dWrites db) evts2
         return i
     where
         getID (Just i) l = do
@@ -484,4 +527,7 @@ deleteProperty db oid = do
         Nothing -> return ()
     freeID oid 1 (mdGenPropertyID $ dMetadata db)
     SM.delete oid $ gdProperties $ dData db
-    writeTQueue (dWrites db) (DeletedProperty oid)
+    cnts <- readTVar (mdCounts $ dMetadata db)
+    let cnts2 = cnts{cProperties=cProperties cnts -1}
+    writeTVar (mdCounts $ dMetadata db) cnts2
+    writeTQueue (dWrites db) [DeletedProperty oid,WrittenCounts cnts2]

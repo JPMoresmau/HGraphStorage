@@ -29,10 +29,14 @@ edgeFile = "edges.db"
 propertyFile :: FilePath
 propertyFile = "properties.db"
 
--- | The name of the property type file
+-- | The name of the model file
 modelFile :: FilePath
 modelFile = "model.db"
 
 -- | The name of the property value file
 propertyValuesFile :: FilePath
 propertyValuesFile = "propertyvalues.db"
+
+-- | The name of the counts file
+countsFile :: FilePath
+countsFile = "counts.db"

@@ -434,8 +434,47 @@ freeID i l tv = do
 newIDGen :: Int64 -> IDGen
 newIDGen st= IDGen st DM.empty
 
+data Counts = Counts
+ { cNodes :: Int64
+ ,  cEdges :: Int64
+ ,  cProperties :: Int64
+ } deriving (Read,Show,Eq,Ord,Typeable)
+
+
+
+instance Default Counts where
+  def = Counts 0 0 0
+
+-- | Storable dictionary
+storeCounts :: Store.Dictionary Counts
+storeCounts = Store.run $
+  Counts
+     <$> Store.element cNodes
+     <*> Store.element cEdges
+     <*> Store.element cProperties
+
+-- | Storable instance
+instance Storable Counts where
+    sizeOf = Store.sizeOf storeCounts
+    alignment = Store.alignment storeCounts
+    peek = Store.peek storeCounts
+    poke = Store.poke storeCounts
+
+-- | simple binary instance
+instance Binary Counts where
+    put (Counts n e p) = do
+        put n
+        put e
+        put p
+    get = Counts <$> get <*> get <*> get
+
+-- | size of a counts record
+countsSize :: Int64
+countsSize = binLength (def::Counts)
+
 data MetaData = MetaData
   { mdModel :: TVar Model
+  ,  mdCounts :: TVar Counts
   ,  mdGenNodeID :: TVar IDGen
   ,  mdGenEdgeID :: TVar IDGen
   ,  mdGenPropertyID :: TVar IDGen
@@ -445,6 +484,7 @@ data MetaData = MetaData
 newMetaData :: STM MetaData
 newMetaData = MetaData
     <$> newTVar def
+    <*> newTVar def
     <*> newTVar (newIDGen 1)
     <*> newTVar (newIDGen 1)
     <*> newTVar (newIDGen 1)
@@ -466,6 +506,7 @@ newGraphData = GraphData
 
 data WriteEvent =
     WrittenModel Model
+  | WrittenCounts Counts
   | WrittenNode NodeID Node
   | WrittenEdge EdgeID Edge
   | WrittenProperty PropertyID (Property,BS.ByteString)
@@ -479,7 +520,7 @@ data WriteEvent =
 data Database = Database
   { dMetadata :: MetaData
   ,  dData :: GraphData
-  ,  dWrites :: TQueue WriteEvent
+  ,  dWrites :: TQueue [WriteEvent]
   ,  dWriterThread :: MVar ()
   }
 
@@ -496,6 +537,7 @@ data Handles =  Handles
   , hEdges      :: Handle
   , hProperties     :: Handle
   , hPropertyValues :: Handle
+  , hCounts :: Handle
   , hModel :: FilePath
   } -- ^ Direct Handles
   |  MMHandles
@@ -503,6 +545,7 @@ data Handles =  Handles
   , mhEdges      :: MMapHandle Edge
   , mhProperties     :: MMapHandle Property
   , mhPropertyValues :: MMapHandle Word8
+  , mhCounts :: MMapHandle Counts
   , hModel :: FilePath
   } -- ^ MMap Handles
 

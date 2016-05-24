@@ -30,6 +30,7 @@ import Control.Exception
 import Debug.Trace
 
 import           System.IO
+import Data.Int
 
 type GraphMap = DM.Map T.Text (DM.Map T.Text [(T.Text,T.Text)])
 
@@ -130,13 +131,17 @@ getSubDirs folder = do
           else return False
 
 
-writeGraph :: GraphMap -> IO Int
+writeGraph :: GraphMap -> IO Int64
 writeGraph memGraph = withTempDB "hackage-test-stmgraph" True $ do
   --indexPackageNames <- createIndex "packageNames"
   -- _ <- addIndex $ IndexInfo "packageNames" ["Package"] ["name"]
-  pkgMap <- foldM createPackage DM.empty $ take 2000 $ DM.keys memGraph
+  pkgMap <- foldM createPackage DM.empty $ DM.keys memGraph
   mapM_ (createVersions pkgMap) $ DM.toList memGraph
-  nbNodes
+  nds<-nbNodes
+  liftIO $ putStrLn ("Nodes:" ++ (show nds))
+  eds <- nbEdges
+  liftIO $ putStrLn ( "Edges:" ++ (show eds))
+  return nds
   where
     createPackage m pkg = do
       goPkg <-addNode "Package" [TextP "name" pkg]
