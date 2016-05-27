@@ -1,5 +1,7 @@
 {-# LANGUAGE DeriveFunctor,DeriveGeneric,FlexibleContexts,GeneralizedNewtypeDeriving,MultiParamTypeClasses,RecordWildCards #-}
 -- | MVCC implementation
+--
+-- <https://en.wikipedia.org/wiki/Multiversion_concurrency_control>
 module Database.LowLevelDB.MVCC
     ( TransactionManager(..)
     , withTransactions
@@ -30,6 +32,7 @@ data TransactionStatus = Started | Committed | Aborted
 data Transaction = Transaction
     {txId :: Int64
     , txStatus :: TransactionStatus
+    , txCommittedID :: Int64
     , txCreated :: Int
     , txDeleted :: Int
     } deriving (Show,Read,Eq,Ord,Typeable,Generic)
@@ -67,7 +70,7 @@ newTransaction :: (Monad m)=>MVCCStateT m Transaction
 newTransaction  = do
     tm <- get
     let next = txmLast tm + 1
-        tx = Transaction next Started 0 0
+        tx = Transaction next Started def 0 0
     put tm
         { txmActive=DS.insert next (txmActive tm)
         , txmAll = DM.insert next tx (txmAll tm)
@@ -115,24 +118,29 @@ readRecord tx records = do
     return $ listToMaybe
                 $ filter (isVisible tx tm) records -- visible records
 
-isCommitted :: Int64 -> TransactionManager -> Bool
-isCommitted txId TransactionManager{..} = maybe False (\t->txStatus t==Committed) $ DM.lookup txId txmAll
+isCommittedBefore :: Transaction -> Int64 -> TransactionManager -> Bool
+isCommittedBefore tx tId TransactionManager{..} =
+    maybe False
+        (\t->txStatus t==Committed && (txCommittedID t)<(txId tx))
+        $ DM.lookup tId txmAll
 
 -- |
 -- <http://momjian.us/main/writings/pgsql/mvcc.pdf>
 -- <http://momjian.us/main/writings/pgsql/internalpics.pdf>
 isVisible :: Transaction -> TransactionManager -> Record r -> Bool
-isVisible Transaction{..} tm Record{..}=
+isVisible tx@Transaction{..} tm Record{..}=
     (rMin == txId -- inserted by current transaction
         && (rMax==def)) -- not deleted
-    || (isCommitted rMin tm -- inserted by a commited transaction
+    || (isCommittedBefore tx rMin tm -- inserted by a commited transaction
         && (rMax == def -- not deleted
-            || not (isCommitted rMax tm))) -- deleted by a transaction not committed
+            || not (isCommittedBefore tx rMax tm))) -- deleted by a transaction not committed
 
 closeTx :: (Monad m) => TransactionStatus -> Transaction -> MVCCStateT m ()
 closeTx ts tx = do
     tm <- get
-    let tx2 = tx{txStatus=ts}
+    let tx2 = if Committed == ts
+                    then tx{txStatus=ts,txCommittedID=txmLast tm}
+                    else tx{txStatus=ts}
         tm2 = if hasWritten tx
                       then tm {txmAll = DM.insert (txId tx2) tx2 (txmAll tm)}
                       else tm {txmAll = DM.delete (txId tx) (txmAll tm)}

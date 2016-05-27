@@ -1,6 +1,8 @@
 {-# LANGUAGE RankNTypes,ScopedTypeVariables,DeriveGeneric,GADTs,ConstraintKinds #-}
 -- | Trie saved to disk, using mmap
+--
 -- <http://sqlity.net/en/2445/b-plus-tree>
+--
 -- <http://en.wikipedia.org/wiki/Trie>
 module Database.LowLevelDB.Trie
   ( Trie (..)

@@ -7,6 +7,7 @@ import Database.LowLevelDB.MVCC
 import Test.Hspec
 import Control.Monad
 import Control.Monad.Trans.Class
+import qualified Data.Map as DM
 
 spec :: Spec
 spec = describe "MVCC tests" $ do
@@ -22,8 +23,8 @@ spec = describe "MVCC tests" $ do
             (tx1'',rs2) <- deleteRecord tx1' rs1
             lift (rs2 `shouldBe` [])
             commit tx1''
-      it "Works on serialized committed transactions" $
-        void $ withTransactions $ do
+      it "Works on serialized committed transactions" $ do
+        (_,tm)<- withTransactions $ do
             tx1 <- newTransaction
             (tx1',rs1) <- writeRecord tx1 [] "foo"
             commit tx1'
@@ -36,6 +37,8 @@ spec = describe "MVCC tests" $ do
             mv2 <- readRecord tx3 rs2
             lift (mv2 `shouldBe` Nothing)
             commit tx3
+        DM.size (txmAll tm) `shouldBe` 2
+        txmLast tm `shouldBe` 3
       it "Works on update on serialized committed transactions" $
         void $ withTransactions $ do
             tx1 <- newTransaction
@@ -77,3 +80,60 @@ spec = describe "MVCC tests" $ do
             mv2 <- readRecord tx3 rs2
             lift (rValue <$> mv2 `shouldBe` Just "foo")
             commit tx3
+  describe "Concurrent transactions" $ do
+    it "Transaction doesn't see uncommitted data" $ do
+        void $ withTransactions $ do
+            tx1 <- newTransaction
+            (_,rs1) <- writeRecord tx1 [] "foo"
+            tx2 <- newTransaction
+            mv1 <- readRecord tx2 rs1
+            lift (mv1 `shouldBe` Nothing)
+    it "Transaction doesn't see data added committed after it started" $ do
+        void $ withTransactions $ do
+            tx1 <- newTransaction
+            (tx1',rs1) <- writeRecord tx1 [] "foo"
+            tx2 <- newTransaction
+            mv1 <- readRecord tx2 rs1
+            lift (mv1 `shouldBe` Nothing)
+            commit tx1'
+            mv2 <- readRecord tx2 rs1
+            lift (mv2 `shouldBe` Nothing)
+            rollback tx2
+    it "Transaction still sees data deleted and committed after it started" $ do
+        void $ withTransactions $ do
+            tx1 <- newTransaction
+            (tx1',rs1) <- writeRecord tx1 [] "foo"
+            commit tx1'
+            tx2 <- newTransaction
+            (tx2',rs2) <- deleteRecord tx2 rs1
+            tx3 <- newTransaction
+            mv1 <- readRecord tx3 rs2
+            lift (rValue <$> mv1 `shouldBe` Just "foo")
+            commit tx2'
+            mv1' <- readRecord tx3 rs2
+            lift (rValue <$> mv1' `shouldBe` Just "foo")
+            rollback tx3
+    it "Respects Wikipedia example" $ do
+        void $ withTransactions $ do
+            tx0 <- newTransaction
+            (tx0',rs1) <- writeRecord tx0 [] "Foo"
+            (tx0'',rs2) <- writeRecord tx0' [] "Bar"
+            commit tx0''
+            tx1 <- newTransaction
+            (tx1',rs1') <- writeRecord tx1 rs1 "Hello"
+            commit tx1'
+            tx2 <- newTransaction
+            mv1 <- readRecord tx2 rs1'
+            lift (rValue <$> mv1 `shouldBe` Just "Hello")
+            mv2 <- readRecord tx2 rs2
+            lift (rValue <$> mv2 `shouldBe` Just "Bar")
+            tx3 <- newTransaction
+            (tx3',rs2') <- deleteRecord tx3 rs2
+            (tx3'',rs3) <- writeRecord tx3' [] "Foo-Bar"
+            commit tx3''
+            mv1' <- readRecord tx2 rs1'
+            lift (rValue <$> mv1' `shouldBe` Just "Hello")
+            mv2' <- readRecord tx2 rs2'
+            lift (rValue <$> mv2' `shouldBe` Just "Bar")
+            mv3 <- readRecord tx2 rs3
+            lift (mv3 `shouldBe` Nothing)
