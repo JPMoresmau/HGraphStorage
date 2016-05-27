@@ -6,6 +6,7 @@ license: AllRightsReserved
 
 library
     exposed-modules:
+        Database.LowLevelDB.Conversions
         Database.LowLevelDB.MMapHandle
         Database.LowLevelDB.Trie
     build-depends:
@@ -15,7 +16,9 @@ library
         filepath -any,
         directory -any,
         data-default -any,
-        binary -any
+        binary -any,
+        storable-record -any
+    default-language: Haskell2010
     hs-source-dirs: src
     ghc-options: -Wall
 
@@ -35,13 +38,35 @@ test-suite test-LowLevelDB
         async -any,
         data-default -any,
         binary -any,
-        text
+        text -any,
+        storable-record -any
     default-language: Haskell2010
     hs-source-dirs: test src
     other-modules:
+        Database.LowLevelDB.Conversions
         Database.LowLevelDB.MMapHandle
         Database.LowLevelDB.MMapHandleSpec
         Database.LowLevelDB.Trie
         Database.LowLevelDB.TestUtils
         Database.LowLevelDB.TrieSpec
     ghc-options: -ferror-spans -Wall
+
+benchmark bench-LowLevelDB
+    type: exitcode-stdio-1.0
+    main-is: Main.hs
+    build-depends:
+        base >=4 && <5,
+        LowLevelDB -any,
+        criterion -any,
+        mmap -any,
+        bytestring -any,
+        filepath -any,
+        directory -any,
+        data-default -any,
+        binary -any,
+        text -any
+    default-language: Haskell2010
+    hs-source-dirs: perf
+    other-modules:
+        Database.LowLevelDB.TrieBench
+    ghc-options: -fprof-auto -Wall -ferror-spans -threaded -rtsopts -with-rtsopts=-N2

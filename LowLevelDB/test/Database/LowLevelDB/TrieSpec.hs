@@ -15,21 +15,20 @@
 
 module Database.LowLevelDB.TrieSpec where
 import Database.LowLevelDB.MMapHandle
+import Database.LowLevelDB.Conversions
 import Database.LowLevelDB.Trie as T
 import Database.LowLevelDB.TestUtils
 import Data.Int
 import Test.Hspec
 import qualified Data.Text as T
 import Data.Word
-import Foreign.Storable
+
 
 spec :: Spec
 spec = describe "Trie tests" $ do
   it "Trie test" $
      withTempFile "trie" $ \f -> do
-      let d0=24::Word8
-      mm <- openMmap f (0,4096) d0
-      tr :: (Trie Int16 Int16) <- newTrie mm
+      tr :: (Trie Int16 Int16) <- newFileTrie f
       T.lookup (toInt16 "A") tr >>= (`shouldBe`  Nothing)
       T.lookup (toInt16 "to") tr >>= (`shouldBe` Nothing)
       insertNew (toInt16 "A") 15 tr >>= (`shouldBe` Nothing)
@@ -70,7 +69,7 @@ spec = describe "Trie tests" $ do
       (Nothing `shouldBe`) =<<T.lookup (toInt16 "in") tr
       equalsM (Just 9) $ T.lookup (toInt16 "inn") tr
       equalsM (Just 11) $ T.lookup (toInt16 "i") tr
-      closeMmap mm
+      closeMmap $ trHandle tr
   it "Collision test" $
      withTempFile "trie" $ \f -> do
       tr :: (Trie Int16 Int32) <- newFileTrie f
@@ -88,9 +87,7 @@ spec = describe "Trie tests" $ do
       closeMmap $ trHandle tr
   it "Prefix test" $
      withTempFile "trie" $ \f -> do
-      let d0=24::Word8
-      mm <- openMmap f (0,4096) d0
-      tr :: (Trie Int16 Int16) <- newTrie mm
+      tr :: (Trie Int16 Int16) <- newFileTrie f
       (Nothing `shouldBe`) =<<insertNew (toInt16 "A") 15 tr
       (Nothing `shouldBe`) =<<insertNew (toInt16 "tea") 3 tr
       (Nothing `shouldBe`) =<<insertNew (toInt16 "ted") 4 tr
@@ -100,7 +97,32 @@ spec = describe "Trie tests" $ do
       equalsM [((toInt16 "tea"),3),((toInt16 "ted"),4)] $ prefix (toInt16 "te") tr
       equalsM [((toInt16 "tea"),3),((toInt16 "ted"),4),((toInt16 "to"),7)] $ prefix (toInt16 "t") tr
       equalsM [((toInt16 "A"),15),((toInt16 "tea"),3),((toInt16 "ted"),4),((toInt16 "to"),7)] $ prefix [] tr
-      closeMmap mm
+      closeMmap $ trHandle tr
+  it "Int64 keys as Word8" $
+      withTempFile "trie" $ \f -> do
+        tr :: (Trie Word8 Int16) <- newFileTrie f
+        insertNew (toWord8s (100::Int64)) 15 tr >>= (`shouldBe` Nothing)
+        T.lookup (toWord8s (100::Int64)) tr >>= (`shouldBe` (Just 15))
+        insertNew (toWord8s (1000::Int64)) 25 tr >>= (`shouldBe` Nothing)
+        T.lookup (toWord8s (1000::Int64)) tr >>= (`shouldBe` (Just 25))
+        closeMmap $ trHandle tr
+  it "Int64 keys as Bits" $
+      withTempFile "trie" $ \f -> do
+        tr :: (Trie Word8 Int16) <- newFileTrie f
+        insertNew (toBits (100::Int64)) 15 tr >>= (`shouldBe` Nothing)
+        T.lookup (toBits (100::Int64)) tr >>= (`shouldBe` (Just 15))
+        insertNew (toBits (1000::Int64)) 25 tr >>= (`shouldBe` Nothing)
+        T.lookup (toBits (1000::Int64)) tr >>= (`shouldBe` (Just 25))
+        closeMmap $ trHandle tr
+  it "Int64 keys as Word4" $
+      withTempFile "trie" $ \f -> do
+        tr :: (Trie Word8 Int16) <- newFileTrie f
+        insertNew (toWord4s (100::Int64)) 15 tr >>= (`shouldBe` Nothing)
+        T.lookup (toWord4s (100::Int64)) tr >>= (`shouldBe` (Just 15))
+        insertNew (toWord4s (1000::Int64)) 25 tr >>= (`shouldBe` Nothing)
+        T.lookup (toWord4s (1000::Int64)) tr >>= (`shouldBe` (Just 25))
+        closeMmap $ trHandle tr
+
 
 -- | equals assertion in the monad
 equalsM :: (Show a, Eq a) =>
@@ -108,6 +130,7 @@ equalsM :: (Show a, Eq a) =>
 equalsM a f = (a `shouldBe`) =<< f
 
 
--- | Convert a string to an array of int16
+-- | Convert a text to an array of int16
 toInt16 :: T.Text -> [Int16]
 toInt16 = map (fromIntegral . fromEnum) . T.unpack
+

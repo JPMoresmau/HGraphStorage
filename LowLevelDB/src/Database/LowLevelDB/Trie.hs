@@ -1,4 +1,4 @@
-{-# LANGUAGE RankNTypes,ScopedTypeVariables,DeriveGeneric #-}
+{-# LANGUAGE RankNTypes,ScopedTypeVariables,DeriveGeneric,GADTs #-}
 -- License     :  AllRightsReserved
 --
 -- Maintainer  :
@@ -19,19 +19,16 @@ module Database.LowLevelDB.Trie
   , insert
   , Database.LowLevelDB.Trie.lookup
   , prefix
-  , delete
-  , binLength)
+  , delete)
 where
 
 import Database.LowLevelDB.MMapHandle
 import Data.Int (Int64)
 import Data.Typeable
 import GHC.Generics (Generic)
-import Data.Binary
-import Data.List (unfoldr)
+import Foreign.Storable as FS
+import Foreign.Storable.Record  as Store
 import Data.Default
-import Data.Bits
-import qualified Data.ByteString.Lazy  as BS
 import System.FilePath
 import System.Directory
 import Data.IORef
@@ -39,22 +36,34 @@ import Control.Monad
 
 -- | Trie on disk
 data Trie k v = Trie
-  { trHandle     :: MMapHandle Word8 -- ^ The disk Handle
+  { trHandle     :: MMapHandle (TrieNode k v) -- ^ The disk Handle
   , trRecordLength :: Int64 -- ^ The length of a record
   , trMax :: IORef Int64 -- ^ End offset
   }
 
 -- | A Trie Node
-data TrieNode k v = TrieNode
+data TrieNode k v =  TrieNode
   { tnKey       :: k     -- ^ the key (def for nothing)
   , tnValue     :: v     -- ^ the value (def for nothing)
   , tnNext      :: Int64 -- ^ the offset of next sibling (def for nothing)
   , tnChild     :: Int64 -- ^ the offset of first child (def for nothing)
   } deriving (Show,Read,Eq,Ord,Typeable,Generic)
 
+-- | Storable dictionary
+storeTrieNode :: (Storable k,Storable v) =>Store.Dictionary (TrieNode k v)
+storeTrieNode = Store.run $
+  TrieNode
+     <$> Store.element tnKey
+     <*> Store.element tnValue
+     <*> Store.element tnNext
+     <*> Store.element tnChild
 
--- | Simple binary instance
-instance (Binary k, Binary v) => Binary (TrieNode k v)
+-- | Storable instance
+instance (Storable k,Storable v) =>Storable (TrieNode k v) where
+    sizeOf = Store.sizeOf storeTrieNode
+    alignment = Store.alignment storeTrieNode
+    peek = Store.peek storeTrieNode
+    poke = Store.poke storeTrieNode
 
 
 
@@ -63,60 +72,44 @@ instance (Default k, Default v) => Default (TrieNode k v) where
 
 
 -- | Build a file backed trie
-newFileTrie  :: forall k v. (Binary k,Binary v,Default k,Default v) => FilePath -> IO (Trie k v)
+newFileTrie  :: forall k v. (Storable k,Storable v,Default k,Default v) => FilePath -> IO (Trie k v)
 newFileTrie file = do
   let dir = takeDirectory file
   createDirectoryIfMissing True dir
-  h<- openMmap file (0,4069) def
+  h<- openMmap file (0,4096) def
   newTrie h
 
 
-unroll :: Int64 -> [Word8]
-unroll = unfoldr step
-  where
-    step 0 = Nothing
-    step i = Just (fromIntegral i, i `shiftR` 8)
-
-roll :: [Word8] -> Int64
-roll   = foldr unstep 0
-  where
-    unstep b a = a `shiftL` 8 .|. fromIntegral b
 
 -- | Create a new trie with a given handle
 -- The limitations are:
 -- Key element and Value must have a binary representation of constant length!
-newTrie :: forall k v. (Binary k,Binary v,Default k,Default v) => MMapHandle Word8 -> IO (Trie k v)
+newTrie :: forall k v. (Storable k,Storable v,Default k,Default v) => MMapHandle (TrieNode k v) -> IO (Trie k v)
 newTrie h = do
-    mx <- roll <$> peekWord8s h 0 4
-    ioMx <- newIORef (max mx 4)
-    return $ Trie h (keyL+valL+pointL*2) ioMx
-  where
-    keyL   = binLength (def::k)
-    valL   = binLength (def::v)
-    pointL = binLength (def::Int64)
+    let sz = fromIntegral $ FS.sizeOf (undefined::(TrieNode k v))
+    tn <- peekMM h 0
+    ioMx <- newIORef (max (tnNext tn) sz)
+    return $ Trie h sz ioMx
 
--- | Calculates the length of the binary serialization of the given object
-binLength :: (Binary b) => b -> Int64
-binLength = BS.length . encode
 
 -- | Insert a value if it does not exist in the tree
 -- if it exists, return the old value and does nothing
-insertNew :: (Binary k,Eq k,Default k,Binary v,Eq v,Default v) => [k] -> v -> Trie k v -> IO (Maybe v)
+insertNew :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v) => [k] -> v -> Trie k v -> IO (Maybe v)
 insertNew key val tr = insertValue key val tr $ \h (off,node) -> do
   let v=tnValue node
   if v /= def
     then return $ Just v
     else do
-      pokeMMBSL h (encode (node{tnValue=val}))  $ fromIntegral off
+      pokeMM h (node{tnValue=val})  $ fromIntegral off
       checkOff tr off
       return Nothing
 
 
 -- | Insert a value for a key
 -- if the value existed for that key, return the old value
-insert :: (Binary k,Eq k,Default k,Binary v,Eq v,Default v) => [k] -> v -> Trie k v -> IO (Maybe v)
+insert :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v) => [k] -> v -> Trie k v -> IO (Maybe v)
 insert key val tr = insertValue key val tr $ \h (off,node) -> do
-    pokeMMBSL h (encode (node{tnValue=val}))  $ fromIntegral off
+    pokeMM h (node{tnValue=val})  $ fromIntegral off
     checkOff tr off
     let v=tnValue node
     return $ if v /= def
@@ -131,19 +124,19 @@ checkOff tr off = do
     isz = fromIntegral $ trRecordLength tr
 
 -- | Insert a value performing a given action if the key is already present
-insertValue :: (Binary k,Eq k,Default k,Binary v,Eq v,Default v)
+insertValue :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v)
   => [k] -> v -> Trie k v
-  -> (MMapHandle Word8 -> (Int64,TrieNode k v) ->IO (Maybe v))
+  -> (MMapHandle (TrieNode k v) -> (Int64,TrieNode k v) ->IO (Maybe v))
   -> IO (Maybe v)
 insertValue key val tr onExisting =
-  readRecord tr 4 >>= insert' key
+  readRecord tr (trRecordLength tr) >>= insert' key
   where
     h = trHandle tr
     insert' [] _ = return Nothing
     insert' (k:ks) Nothing = do
       let newC = TrieNode k (if null ks then val else def) def def
       allsz <- getEnd
-      pokeMMBSL h (encode newC) (fromIntegral allsz)
+      pokeMM h newC (fromIntegral allsz)
       insertChild ks (Just (allsz,newC))
     insert' (k:ks) (Just (off,node)) =
       if k == tnKey node
@@ -157,8 +150,8 @@ insertValue key val tr onExisting =
             Nothing -> do
               allsz <- getEnd
               let newN = TrieNode k (if null ks then val else def) def def
-              pokeMMBSL h (encode newN) (fromIntegral allsz)
-              pokeMMBSL h (encode (node{tnNext=allsz})) (fromIntegral off)
+              pokeMM h newN (fromIntegral allsz)
+              pokeMM h (node{tnNext=allsz}) (fromIntegral off)
               insertChild ks (Just (allsz,newN))
     insertChild [] _      = return Nothing
     insertChild _ Nothing = return Nothing
@@ -169,37 +162,35 @@ insertValue key val tr onExisting =
         Nothing -> do
           allsz <- getEnd
           let newC = TrieNode k' (if null ks' then val else def) def def
-          pokeMMBSL h (encode newC) (fromIntegral allsz)
-          pokeMMBSL h (encode (node{tnChild=allsz})) (fromIntegral off)
+          pokeMM h newC (fromIntegral allsz)
+          pokeMM h (node{tnChild=allsz}) (fromIntegral off)
           insertChild ks' (Just (allsz,newC))
     getEnd = do
         mx<-atomicModifyIORef (trMax tr) (\mx->(mx+isz,mx))
         v <- readIORef (trMax tr)
-        pokeWord8s h (unroll v) 0
+        pokeMM h (TrieNode def def v def) 0
         return mx
     isz = fromIntegral $ trRecordLength tr
 
 -- | Read a given record
-readRecord :: (Binary k,Eq k,Binary v,Eq v,Default k,Default v) => Trie k v -> Int64 -> IO (Maybe (Int64,TrieNode k v))
+readRecord :: (Storable k,Eq k,Storable v,Eq v,Default k,Default v) => Trie k v -> Int64 -> IO (Maybe (Int64,TrieNode k v))
 readRecord tr off = do
-    bs <- peekMMBSL h (fromIntegral off) isz
-    let tn = decode bs
+    tn <- peekMM h (fromIntegral off)
     if tn == def
       then return Nothing
       else return $ Just (off, tn)
   where
     h = trHandle tr
-    isz = fromIntegral $ trRecordLength tr
 
 
 -- | Read a given record whose offset must be greater than 0
-readChildRecord :: (Binary k,Binary v,Eq k,Eq v,Default k,Default v) => Trie k v -> Int64 -> IO (Maybe (Int64,TrieNode k v))
+readChildRecord :: (Storable k,Storable v,Eq k,Eq v,Default k,Default v) => Trie k v -> Int64 -> IO (Maybe (Int64,TrieNode k v))
 readChildRecord _ 0 = return Nothing
 readChildRecord tr off = readRecord tr off
 
 
 -- | Lookup a value from a key
-lookup :: (Binary k,Eq k,Default k,Binary v,Eq v,Default v) => [k] -> Trie k v -> IO (Maybe v)
+lookup :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v) => [k] -> Trie k v -> IO (Maybe v)
 lookup key tr = do
   mnode <- lookupNode key tr
   return $ case mnode of
@@ -212,8 +203,8 @@ lookup key tr = do
 
 
 -- | Lookup a node from a Key
-lookupNode :: (Binary k,Eq k,Default k,Binary v,Eq v,Default v) => [k] -> Trie k v -> IO (Maybe (Int64, TrieNode k v))
-lookupNode key tr = readRecord tr 4 >>= lookup' key
+lookupNode :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v) => [k] -> Trie k v -> IO (Maybe (Int64, TrieNode k v))
+lookupNode key tr = readRecord tr (trRecordLength tr) >>= lookup' key
   where
     lookup' [] r = return r
     lookup' _ Nothing = return Nothing
@@ -228,7 +219,7 @@ lookupNode key tr = readRecord tr 4 >>= lookup' key
 
 
 -- | Return all key and values for the given prefix which may be null (in which case all mappings are returned).
-prefix :: (Binary k,Eq k,Default k,Binary v,Eq v,Default v) => [k] -> Trie k v -> IO [([k],v)]
+prefix :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v) => [k] -> Trie k v -> IO [([k],v)]
 prefix key tr = lookupNode key tr >>= collect (null key) key
   where
     collect _ _ Nothing = return []
@@ -244,7 +235,7 @@ prefix key tr = lookupNode key tr >>= collect (null key) key
 
 -- | Delete the value associated with a key
 -- This only remove the value from the trienode, it doesn't prune the trie in any way.
-delete :: forall k v. (Binary k,Eq k,Default k,Binary v,Eq v,Default v) => [k] -> Trie k v-> IO (Maybe v)
+delete :: forall k v. (Storable k,Eq k,Default k,Storable v,Eq v,Default v) => [k] -> Trie k v-> IO (Maybe v)
 delete key tr = do
   mnode <- lookupNode key tr
   case mnode of
@@ -253,7 +244,7 @@ delete key tr = do
       if oldV /= def
         then do
           let (node'::TrieNode k v) = node{tnValue=def}
-          pokeMMBSL h (encode node') $ fromIntegral off
+          pokeMM h node' $ fromIntegral off
           return $ Just oldV
         else return Nothing
     _ -> return Nothing
