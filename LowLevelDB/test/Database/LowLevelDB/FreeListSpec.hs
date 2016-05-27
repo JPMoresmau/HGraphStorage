@@ -1,18 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
------------------------------------------------------------------------------
---
--- Module      :  Database.LowLevelDB.FreeListSpec
--- Copyright   :
--- License     :  AllRightsReserved
---
--- Maintainer  :
--- Stability   :
--- Portability :
---
--- |
---
------------------------------------------------------------------------------
-
+-- | Test free list
 module Database.LowLevelDB.FreeListSpec where
 
 import Database.LowLevelDB.FreeList
@@ -26,7 +13,7 @@ spec :: Spec
 spec = describe "FreeList tests" $ do
  it "Free List ending empty" $
      withTempFile "freelist" $ \f -> do
-      fl <- newFileFreeList f (1::Int8) (return ())
+      fl <- newFileFreeList f (1::Int8)
       m1 <- getFromFreeList fl
       m1 `shouldBe` Nothing
       addToFreeList 3 fl
@@ -44,7 +31,7 @@ spec = describe "FreeList tests" $ do
       hasData `shouldBe` False
  it "Free List ending with data" $
      withTempFile "freelist" $ \f -> do
-      fl <- newFileFreeList f (1::Int8) (return ())
+      fl <- newFileFreeList f (1::Int8)
       m1 <- getFromFreeList fl
       m1 `shouldBe` Nothing
       addToFreeList 3 fl

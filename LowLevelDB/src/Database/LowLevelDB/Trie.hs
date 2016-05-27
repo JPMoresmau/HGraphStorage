@@ -1,18 +1,10 @@
-{-# LANGUAGE RankNTypes,ScopedTypeVariables,DeriveGeneric,GADTs #-}
--- License     :  AllRightsReserved
---
--- Maintainer  :
--- Stability   :
--- Portability :
---
--- |
+{-# LANGUAGE RankNTypes,ScopedTypeVariables,DeriveGeneric,GADTs,ConstraintKinds #-}
+-- | Trie saved to disk, using mmap
 -- <http://sqlity.net/en/2445/b-plus-tree>
 -- <http://en.wikipedia.org/wiki/Trie>
---
------------------------------------------------------------------------------
-
 module Database.LowLevelDB.Trie
   ( Trie (..)
+  , TrieConstraint
   , openTrie
   , openFileTrie
   , closeTrie
@@ -42,7 +34,7 @@ data Trie k v = Trie
   { trHandle     :: MMapHandle (TrieNode k v) -- ^ The disk Handle
   , trRecordLength :: Int64 -- ^ The length of a record
   , trMax :: IORef Int64 -- ^ End offset
-  , trFreeList :: Maybe (FreeList Int64 IO)
+  , trFreeList :: Maybe (FreeList Int64) -- ^ Optional free list to reuse offsets
   }
 
 -- | A Trie Node
@@ -70,33 +62,32 @@ instance (Storable k,Storable v) =>Storable (TrieNode k v) where
     poke = Store.poke storeTrieNode
 
 
-
+-- | Default instance
 instance (Default k, Default v) => Default (TrieNode k v) where
     def = TrieNode def def def def
 
+-- | A synonym for the constraints on the key, value, and the monad we operate in
+type TrieConstraint k v m = (Eq k,Storable k,Default k,Eq v,Storable v,Default v,MonadIO m)
 
--- | Build a file backed trie
-openFileTrie  :: forall k v m. (Storable k,Storable v,Default k,Default v,MonadIO m) => FilePath -> Maybe FilePath -> m (Trie k v)
+-- | Build a file backed trie, with an optional file backed free list
+openFileTrie  :: (TrieConstraint k v m) => FilePath -> Maybe FilePath -> m (Trie k v)
 openFileTrie file mflf = liftIO $ do
   let dir = takeDirectory file
   createDirectoryIfMissing True dir
   h<- openMmap file (0,4096) def
-  mfl <- sequenceA $ fmap (\flf->newFileFreeList flf (1::Int64) (return ())) mflf
+  mfl <- sequenceA $ fmap (\flf->newFileFreeList flf (1::Int64)) mflf
   openTrie h mfl
 
 
-
--- | Create a new trie with a given handle
--- The limitations are:
--- Key element and Value must have a binary representation of constant length!
-openTrie :: forall k v m. (Storable k,Storable v,Default k,Default v,MonadIO m) => MMapHandle (TrieNode k v) -> Maybe (FreeList Int64 IO) -> m (Trie k v)
+-- | Create a new trie with a given handle and an optional free list
+openTrie :: forall k v m . (TrieConstraint k v m) => MMapHandle (TrieNode k v) -> Maybe (FreeList Int64) -> m (Trie k v)
 openTrie h mfl = liftIO $ do
     let sz = fromIntegral $ FS.sizeOf (undefined::(TrieNode k v))
     tn <- peekMM h 0
     ioMx <- newIORef (max (tnNext tn) sz)
     return $ Trie h sz ioMx mfl
 
-
+-- | Close the trie
 closeTrie :: (MonadIO m)=> Trie k v -> m ()
 closeTrie tr = do
     closeMmap $ trHandle tr
@@ -106,7 +97,7 @@ closeTrie tr = do
 
 -- | Insert a value if it does not exist in the tree
 -- if it exists, return the old value and does nothing
-insertNew :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v,MonadIO m) => [k] -> v -> Trie k v -> m (Maybe v)
+insertNew :: (TrieConstraint k v m) => [k] -> v -> Trie k v -> m (Maybe v)
 insertNew key val tr = liftIO $ insertValue key val tr $ \h (off,node) -> do
   let v=tnValue node
   if v /= def
@@ -119,7 +110,7 @@ insertNew key val tr = liftIO $ insertValue key val tr $ \h (off,node) -> do
 
 -- | Insert a value for a key
 -- if the value existed for that key, return the old value
-insert :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v,MonadIO m) => [k] -> v -> Trie k v -> m (Maybe v)
+insert :: (TrieConstraint k v m) => [k] -> v -> Trie k v -> m (Maybe v)
 insert key val tr = liftIO $ insertValue key val tr $ \h (off,node) -> do
     pokeMM h (node{tnValue=val})  $ fromIntegral off
     checkOff tr off
@@ -128,6 +119,7 @@ insert key val tr = liftIO $ insertValue key val tr $ \h (off,node) -> do
       then Just v
       else Nothing
 
+-- | Check if the offset is over the current maximum, and updates the maximum if it is
 checkOff :: Trie k v  -> Int64 -> IO()
 checkOff tr off = do
     v <- readIORef (trMax tr)
@@ -196,7 +188,7 @@ readChildRecord tr off = readRecord tr off
 
 
 -- | Lookup a value from a key
-lookup :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v,MonadIO m) => [k] -> Trie k v -> m (Maybe v)
+lookup :: (TrieConstraint k v m) => [k] -> Trie k v -> m (Maybe v)
 lookup key tr = do
   mnode <- liftIO $ lookupNode key tr
   return $ case mnode of
@@ -210,22 +202,11 @@ lookup key tr = do
 
 -- | Lookup a node from a Key
 lookupNode :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v) => [k] -> Trie k v -> IO (Maybe (Int64, TrieNode k v))
-lookupNode key tr = readRecord tr (trRecordLength tr) >>= lookup' key
-  where
-    lookup' [] r = return r
-    lookup' _ Nothing = return Nothing
-    lookup' (k:ks) (Just (off,node)) =
-      if k == tnKey node
-        then
-          if null ks
-            then return $ Just (off,node)
-            else readChildRecord tr (tnChild node) >>= lookup' ks
-        else
-          readChildRecord tr (tnNext node) >>= lookup' (k : ks)
+lookupNode key tr = fst <$> lookupNodes key tr
 
 
 -- | Return all key and values for the given prefix which may be null (in which case all mappings are returned).
-prefix :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v,MonadIO m) => [k] -> Trie k v -> m [([k],v)]
+prefix :: (TrieConstraint k v m) => [k] -> Trie k v -> m [([k],v)]
 prefix key tr = liftIO $ lookupNode key tr >>= collect (null key) key
   where
     collect _ _ Nothing = return []
@@ -238,10 +219,11 @@ prefix key tr = liftIO $ lookupNode key tr >>= collect (null key) key
       nexts <- if withNexts then readChildRecord tr (tnNext node) >>= collect True k else return []
       return $ me ++ subs ++ nexts
 
+-- | Step in the look
 data Step k v = ChildOf (Int64,TrieNode k v) | NextOf (Int64,TrieNode k v)
     deriving (Show)
 
--- | Lookup a node from a Key
+-- | Lookup a node from a Key, keeping all the steps in the process
 lookupNodes :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v) => [k] -> Trie k v -> IO (Maybe (Int64, TrieNode k v),[Step k v])
 lookupNodes key tr = readRecord tr (trRecordLength tr) >>= \m-> lookup' key (maybe [] (\a->[ChildOf a]) m) m
   where
@@ -257,7 +239,7 @@ lookupNodes key tr = readRecord tr (trRecordLength tr) >>= \m-> lookup' key (may
           readChildRecord tr (tnNext node) >>= lookup' (k : ks) (NextOf (off,node):steps)
 
 -- | Delete the value associated with a key
-delete :: forall k v m. (Storable k,Eq k,Default k,Storable v,Eq v,Default v,MonadIO m) => [k] -> Trie k v-> m (Maybe v)
+delete :: forall k v m. (TrieConstraint k v m) => [k] -> Trie k v-> m (Maybe v)
 delete key tr = liftIO $ do
   (mnode,steps) <- lookupNodes key tr
   case mnode of
@@ -268,15 +250,16 @@ delete key tr = liftIO $ do
           let (node'::TrieNode k v) = node{tnValue=def}
           pokeMM h node' $ fromIntegral off
           when (tnChild node' == def && off>trRecordLength tr) $
-            registerDelete (off,node) steps tr
+            pruneTree (off,node) steps tr
           return $ Just oldV
         else return Nothing
     _ -> return Nothing
   where
     h = trHandle tr
 
-registerDelete :: (Storable k,Storable v,Eq v,Default v)=>(Int64,TrieNode  k v) -> [Step k v] -> Trie k v ->IO ()
-registerDelete (off,node) steps tr = case trFreeList tr of
+-- | Prune tree on delete
+pruneTree :: (Storable k,Storable v,Eq v,Default v)=>(Int64,TrieNode  k v) -> [Step k v] -> Trie k v ->IO ()
+pruneTree (off,node) steps tr = case trFreeList tr of
     Just fl -> addToFreeList off fl >> processSteps fl node steps
     _ -> return ()
     where
@@ -290,6 +273,7 @@ registerDelete (off,node) steps tr = case trFreeList tr of
         processSteps _ me (NextOf (offs,nodes):_)=
             pokeMM h (nodes{tnNext=tnNext me}) $ fromIntegral offs
 
+-- | Get an empty offset
 getEmpty :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v) => Trie k v -> IO Int64
 getEmpty tr = do
     moff <- case trFreeList tr of

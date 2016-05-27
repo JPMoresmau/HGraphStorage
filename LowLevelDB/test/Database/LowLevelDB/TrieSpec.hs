@@ -1,18 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables,OverloadedStrings #-}
------------------------------------------------------------------------------
---
--- Module      :  Database.LowLevelDB.TrieSpec
--- Copyright   :
--- License     :  AllRightsReserved
---
--- Maintainer  :
--- Stability   :
--- Portability :
---
--- |
---
------------------------------------------------------------------------------
-
+-- | Test tries
 module Database.LowLevelDB.TrieSpec where
 import Database.LowLevelDB.Conversions
 import Database.LowLevelDB.Trie as T

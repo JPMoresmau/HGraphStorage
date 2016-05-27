@@ -1,4 +1,4 @@
--- | Wrap the usage of mmap
+-- | Wraps the usage of mmap, handling extending the mapped area size if necessary
 module Database.LowLevelDB.MMapHandle
   ( MMapHandle
   , openMmap
@@ -73,39 +73,29 @@ pokeMM mm a sz = liftIO $ modifyMVar_ (mhHandle mm) p
           poke (plusPtr (mhPtr h2_) sz) a
           return h2_
 
--- | Write a bytetring into the handle at the given offset
+-- | Write a strict bytetring into the handle at the given offset
 pokeMMBS ::(MonadIO m) => MMapHandle Word8 -> BS.ByteString -> Int -> m ()
-pokeMMBS mm a sz=pokeWord8s mm (BS.unpack a) sz
---    copy (ptrTgt,ptrOrig) _ = do
---       w <- peek ptrOrig
---       poke ptrTgt w
---       return (plusPtr ptrTgt szw,plusPtr ptrOrig szw)
---    fp ptrTgt ptrOrig len = foldM copy (ptrTgt,ptrOrig) [1..len]
---    p h_ = unsafeUseAsCStringLen a (\(ptr,len) -> do
---                let full= sz+len
---                h2_<- if inBounds h_ full
---                            then return h_
---                            else extendMM h_ (mhName mm) full
---                fp (plusPtr (mhPtr h2_) sz) ptr len
---                return h2_
---        )
+pokeMMBS mm a =pokeWord8s mm (BS.unpack a)
 
--- | Write a bytetring into the handle at the given offset
+
+-- | Write a lazy bytetring into the handle at the given offset
 pokeMMBSL :: (MonadIO m)=> MMapHandle Word8 -> BSL.ByteString -> Int -> m ()
-pokeMMBSL mm a sz = pokeWord8s mm (BSL.unpack a) sz
+pokeMMBSL mm a = pokeWord8s mm (BSL.unpack a)
 
--- | Write a bytetring into the handle at the given offset
-pokeWord8s :: (MonadIO m) => MMapHandle Word8 -> [Word8] -> Int -> m ()
-pokeWord8s mm ws sz
+-- | Write an array of words into the handle at the given offset
+pokeWord8s :: (MonadIO m) => MMapHandle Word8 -> [Word8]
+    -> Int -- ^ Offset
+    -> m ()
+pokeWord8s mm ws off
   | null ws = return ()
   | otherwise = liftIO $ modifyMVar_ (mhHandle mm) p
   where
     szw = sizeOf (0::Word8)
-    full = sz + (szw * length ws)
+    full = off + (szw * length ws)
     fp ptr = void $ foldM (\p1 w-> do
             poke p1 w
             let p2 = plusPtr p1 szw
-            return p2) (plusPtr ptr sz) ws
+            return p2) (plusPtr ptr off) ws
     p h_
       | inBounds h_ full = do
           fp (mhPtr h_)
@@ -116,38 +106,52 @@ pokeWord8s mm ws sz
           return h2_
 
 -- | Extend the pointer range to include the given index
-extendMM :: (Storable a) => MMapHandle_ a -> FilePath -> Int -> IO (MMapHandle_ a)
+extendMM :: (Storable a) => MMapHandle_ a -> FilePath
+    -> Int -- ^ The size
+    -> IO (MMapHandle_ a)
 extendMM h_ fp sz = do
     closeMM_ h_
     let (off,_)=mhOrigOff h_
     openMmap_ fp (off,sz*2) undefined
 
 -- | Read the value at the given offset
-peekMM :: (Storable a,MonadIO m) => MMapHandle a -> Int -> m a
-peekMM mm sz = liftIO $ modifyMVar (mhHandle mm) p
+peekMM :: (Storable a,MonadIO m) => MMapHandle a
+    -> Int -- ^ Offset
+    -> m a
+peekMM mm off = liftIO $ modifyMVar (mhHandle mm) p
   where
     p h_
-      | inBounds h_ sz = do
-        a<-peek (plusPtr (mhPtr h_) sz)
+      | inBounds h_ off = do
+        a<-peek (plusPtr (mhPtr h_) off)
         return (h_,a)
       | otherwise = do
-        h2_ <- extendMM h_ (mhName mm) sz
-        a<-peek (plusPtr (mhPtr h2_) sz)
+        h2_ <- extendMM h_ (mhName mm) off
+        a<-peek (plusPtr (mhPtr h2_) off)
         return (h2_,a)
 
--- | Read a byte string at the given offset
-peekMMBS :: (MonadIO m) => MMapHandle Word8 -> Int -> Int -> m BS.ByteString
-peekMMBS mm sz len = BS.pack <$> peekWord8s mm sz len
+-- | Read a strict byte string at the given offset
+peekMMBS :: (MonadIO m) => MMapHandle Word8
+    -> Int -- ^ Offset
+    -> Int -- ^ Length
+    -> m BS.ByteString
+peekMMBS mm off len = BS.pack <$> peekWord8s mm off len
 
--- | Read a byte string at the given offset
-peekMMBSL :: (MonadIO m)=>MMapHandle Word8 -> Int -> Int -> m BSL.ByteString
-peekMMBSL mm sz len = BSL.pack <$> peekWord8s mm sz len
+-- | Read a lazy byte string at the given offset
+peekMMBSL :: (MonadIO m)=>MMapHandle Word8
+    -> Int -- ^ Offset
+    -> Int -- ^ Length
+    -> m BSL.ByteString
+peekMMBSL mm off len = BSL.pack <$> peekWord8s mm off len
 
-peekWord8s :: (MonadIO m)=>MMapHandle Word8 -> Int -> Int -> m [Word8]
-peekWord8s mm sz len = liftIO $ modifyMVar (mhHandle mm) p
+-- | Read an array of words at the given offset
+peekWord8s :: (MonadIO m)=>MMapHandle Word8
+    -> Int -- ^ Offset
+    -> Int -- ^ Length
+    -> m [Word8]
+peekWord8s mm off len = liftIO $ modifyMVar (mhHandle mm) p
   where
     szw = sizeOf (0::Word8)
-    full = sz + (szw * len)
+    full = off + (szw * len)
     fp ptr = snd <$> foldM (\(p1,l) _ -> do
           let p2 = plusPtr p1 (-szw)
           r<-peek p2

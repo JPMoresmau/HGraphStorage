@@ -1,8 +1,16 @@
 name: LowLevelDB
 version: 0.0.1
-cabal-version: 1.12
+cabal-version: >=1.10
 build-type: Simple
-license: AllRightsReserved
+license: BSD3
+license-file: LICENSE
+copyright: JP Moresmau 2016
+maintainer: JP Moresmau <jp@moresmau.fr>
+stability: experimental
+homepage: https://github.com/JPMoresmau/HGraphStorage/LowLevelDB
+synopsis: Low level database disk structures
+category: Database
+author: JP Moresmau <jp@moresmau.fr>
 
 library
     exposed-modules:
@@ -47,6 +55,7 @@ test-suite test-LowLevelDB
     hs-source-dirs: test src
     other-modules:
         Database.LowLevelDB.Conversions
+        Database.LowLevelDB.ConversionsSpec
         Database.LowLevelDB.FreeList
         Database.LowLevelDB.FreeListSpec
         Database.LowLevelDB.MMapHandle
