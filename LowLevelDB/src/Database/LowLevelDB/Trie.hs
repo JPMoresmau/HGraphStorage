@@ -33,6 +33,7 @@ import System.FilePath
 import System.Directory
 import Data.IORef
 import Control.Monad
+import Control.Monad.IO.Class (liftIO, MonadIO)
 
 -- | Trie on disk
 data Trie k v = Trie
@@ -72,8 +73,8 @@ instance (Default k, Default v) => Default (TrieNode k v) where
 
 
 -- | Build a file backed trie
-newFileTrie  :: forall k v. (Storable k,Storable v,Default k,Default v) => FilePath -> IO (Trie k v)
-newFileTrie file = do
+newFileTrie  :: forall k v m. (Storable k,Storable v,Default k,Default v,MonadIO m) => FilePath -> m (Trie k v)
+newFileTrie file = liftIO $ do
   let dir = takeDirectory file
   createDirectoryIfMissing True dir
   h<- openMmap file (0,4096) def
@@ -84,8 +85,8 @@ newFileTrie file = do
 -- | Create a new trie with a given handle
 -- The limitations are:
 -- Key element and Value must have a binary representation of constant length!
-newTrie :: forall k v. (Storable k,Storable v,Default k,Default v) => MMapHandle (TrieNode k v) -> IO (Trie k v)
-newTrie h = do
+newTrie :: forall k v m. (Storable k,Storable v,Default k,Default v,MonadIO m) => MMapHandle (TrieNode k v) -> m (Trie k v)
+newTrie h = liftIO $ do
     let sz = fromIntegral $ FS.sizeOf (undefined::(TrieNode k v))
     tn <- peekMM h 0
     ioMx <- newIORef (max (tnNext tn) sz)
@@ -94,8 +95,8 @@ newTrie h = do
 
 -- | Insert a value if it does not exist in the tree
 -- if it exists, return the old value and does nothing
-insertNew :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v) => [k] -> v -> Trie k v -> IO (Maybe v)
-insertNew key val tr = insertValue key val tr $ \h (off,node) -> do
+insertNew :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v,MonadIO m) => [k] -> v -> Trie k v -> m (Maybe v)
+insertNew key val tr = liftIO $ insertValue key val tr $ \h (off,node) -> do
   let v=tnValue node
   if v /= def
     then return $ Just v
@@ -107,8 +108,8 @@ insertNew key val tr = insertValue key val tr $ \h (off,node) -> do
 
 -- | Insert a value for a key
 -- if the value existed for that key, return the old value
-insert :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v) => [k] -> v -> Trie k v -> IO (Maybe v)
-insert key val tr = insertValue key val tr $ \h (off,node) -> do
+insert :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v,MonadIO m) => [k] -> v -> Trie k v -> m (Maybe v)
+insert key val tr = liftIO $ insertValue key val tr $ \h (off,node) -> do
     pokeMM h (node{tnValue=val})  $ fromIntegral off
     checkOff tr off
     let v=tnValue node
@@ -190,9 +191,9 @@ readChildRecord tr off = readRecord tr off
 
 
 -- | Lookup a value from a key
-lookup :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v) => [k] -> Trie k v -> IO (Maybe v)
+lookup :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v,MonadIO m) => [k] -> Trie k v -> m (Maybe v)
 lookup key tr = do
-  mnode <- lookupNode key tr
+  mnode <- liftIO $ lookupNode key tr
   return $ case mnode of
     Just (_,node) ->
       let v=tnValue node
@@ -219,8 +220,8 @@ lookupNode key tr = readRecord tr (trRecordLength tr) >>= lookup' key
 
 
 -- | Return all key and values for the given prefix which may be null (in which case all mappings are returned).
-prefix :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v) => [k] -> Trie k v -> IO [([k],v)]
-prefix key tr = lookupNode key tr >>= collect (null key) key
+prefix :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v,MonadIO m) => [k] -> Trie k v -> m [([k],v)]
+prefix key tr = liftIO $ lookupNode key tr >>= collect (null key) key
   where
     collect _ _ Nothing = return []
     collect withNexts k (Just (_,node)) = do
@@ -235,8 +236,8 @@ prefix key tr = lookupNode key tr >>= collect (null key) key
 
 -- | Delete the value associated with a key
 -- This only remove the value from the trienode, it doesn't prune the trie in any way.
-delete :: forall k v. (Storable k,Eq k,Default k,Storable v,Eq v,Default v) => [k] -> Trie k v-> IO (Maybe v)
-delete key tr = do
+delete :: forall k v m. (Storable k,Eq k,Default k,Storable v,Eq v,Default v,MonadIO m) => [k] -> Trie k v-> m (Maybe v)
+delete key tr = liftIO $ do
   mnode <- lookupNode key tr
   case mnode of
     Just (off,node) -> do

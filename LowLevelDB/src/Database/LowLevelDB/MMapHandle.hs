@@ -24,7 +24,7 @@ import qualified Data.ByteString.Lazy                  as BSL
 import Data.Word
 import Control.Monad
 
-
+import Control.Monad.IO.Class (liftIO, MonadIO)
 
 -- | A Handle to a Mmapped file
 data MMapHandle a = MMapHandle
@@ -42,12 +42,12 @@ data MMapHandle_ a = MMapHandle_
 
 -- | Open a MMapHandle on a file
 openMmap
-  :: (Storable a)
+  :: (Storable a,MonadIO m)
   => FilePath -- ^ File name
   -> (Int64,Int) -- ^ Offset/length
   -> a  -- ^ needed for alignment, not used
-  -> IO (MMapHandle a)
-openMmap fp offlen u1 = do
+  -> m (MMapHandle a)
+openMmap fp offlen u1 =  liftIO $ do
   h_ <- openMmap_ fp offlen u1
   mv <- newMVar h_
   return $ MMapHandle fp mv
@@ -61,8 +61,8 @@ openMmap_ fp offlen u1 = do
 
 
 -- | Write a value into the handle at the given offset
-pokeMM :: (Storable a) => MMapHandle a -> a -> Int -> IO ()
-pokeMM mm a sz = modifyMVar_ (mhHandle mm) p
+pokeMM :: (Storable a,MonadIO m) => MMapHandle a -> a -> Int -> m ()
+pokeMM mm a sz = liftIO $ modifyMVar_ (mhHandle mm) p
   where
     p h_
       | inBounds h_ (sz + sizeOf a) = do
@@ -74,7 +74,7 @@ pokeMM mm a sz = modifyMVar_ (mhHandle mm) p
           return h2_
 
 -- | Write a bytetring into the handle at the given offset
-pokeMMBS :: MMapHandle Word8 -> BS.ByteString -> Int -> IO ()
+pokeMMBS ::(MonadIO m) => MMapHandle Word8 -> BS.ByteString -> Int -> m ()
 pokeMMBS mm a sz=pokeWord8s mm (BS.unpack a) sz
 --    copy (ptrTgt,ptrOrig) _ = do
 --       w <- peek ptrOrig
@@ -91,14 +91,14 @@ pokeMMBS mm a sz=pokeWord8s mm (BS.unpack a) sz
 --        )
 
 -- | Write a bytetring into the handle at the given offset
-pokeMMBSL :: MMapHandle Word8 -> BSL.ByteString -> Int -> IO ()
+pokeMMBSL :: (MonadIO m)=> MMapHandle Word8 -> BSL.ByteString -> Int -> m ()
 pokeMMBSL mm a sz = pokeWord8s mm (BSL.unpack a) sz
 
 -- | Write a bytetring into the handle at the given offset
-pokeWord8s :: MMapHandle Word8 -> [Word8] -> Int -> IO ()
+pokeWord8s :: (MonadIO m) => MMapHandle Word8 -> [Word8] -> Int -> m ()
 pokeWord8s mm ws sz
   | null ws = return ()
-  | otherwise = modifyMVar_ (mhHandle mm) p
+  | otherwise = liftIO $ modifyMVar_ (mhHandle mm) p
   where
     szw = sizeOf (0::Word8)
     full = sz + (szw * length ws)
@@ -123,8 +123,8 @@ extendMM h_ fp sz = do
     openMmap_ fp (off,sz*2) undefined
 
 -- | Read the value at the given offset
-peekMM :: (Storable a) => MMapHandle a -> Int -> IO a
-peekMM mm sz = modifyMVar (mhHandle mm) p
+peekMM :: (Storable a,MonadIO m) => MMapHandle a -> Int -> m a
+peekMM mm sz = liftIO $ modifyMVar (mhHandle mm) p
   where
     p h_
       | inBounds h_ sz = do
@@ -136,15 +136,15 @@ peekMM mm sz = modifyMVar (mhHandle mm) p
         return (h2_,a)
 
 -- | Read a byte string at the given offset
-peekMMBS :: MMapHandle Word8 -> Int -> Int -> IO BS.ByteString
+peekMMBS :: (MonadIO m) => MMapHandle Word8 -> Int -> Int -> m BS.ByteString
 peekMMBS mm sz len = BS.pack <$> peekWord8s mm sz len
 
 -- | Read a byte string at the given offset
-peekMMBSL :: MMapHandle Word8 -> Int -> Int -> IO BSL.ByteString
+peekMMBSL :: (MonadIO m)=>MMapHandle Word8 -> Int -> Int -> m BSL.ByteString
 peekMMBSL mm sz len = BSL.pack <$> peekWord8s mm sz len
 
-peekWord8s :: MMapHandle Word8 -> Int -> Int -> IO [Word8]
-peekWord8s mm sz len = modifyMVar (mhHandle mm) p
+peekWord8s :: (MonadIO m)=>MMapHandle Word8 -> Int -> Int -> m [Word8]
+peekWord8s mm sz len = liftIO $ modifyMVar (mhHandle mm) p
   where
     szw = sizeOf (0::Word8)
     full = sz + (szw * len)
@@ -162,8 +162,8 @@ peekWord8s mm sz len = modifyMVar (mhHandle mm) p
         return (h2_,a)
 
 -- | Close the MMapHandle
-closeMmap :: MMapHandle a -> IO ()
-closeMmap mm = withMVar (mhHandle mm) closeMM_
+closeMmap :: (MonadIO m) => MMapHandle a -> m ()
+closeMmap mm = liftIO $ withMVar (mhHandle mm) closeMM_
 
 -- | Close the internal handle
 closeMM_ :: MMapHandle_ a -> IO ()

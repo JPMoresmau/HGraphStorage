@@ -19,7 +19,6 @@ main = do
     , bench "Trie Value 64" $ nfIO $ benchTrieWordsValue64 f wrds
     , bench "Trie Key Word8" $ nfIO $ benchTrieInt64AsWord8s f wrds
     , bench "Trie Key Bits" $ nfIO $ benchTrieInt64AsWord8s f wrds
-    ,  bench "Trie Key Word4" $ nfIO $ benchTrieInt64AsWord4s f wrds
     , bench "Trie Key Word4" $ nfIO $ benchTrieInt64AsWord4s f wrds
     ]]
 
