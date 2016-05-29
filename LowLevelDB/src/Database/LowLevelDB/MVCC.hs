@@ -83,12 +83,22 @@ commit = closeTx Committed
 rollback :: (Monad m) => Transaction -> MVCCStateT m ()
 rollback = closeTx Aborted
 
+updateActiveTransaction :: (Monad m)=> Transaction -> MVCCStateT m ()
+updateActiveTransaction tx = do
+    tm <- get
+    put tm{txmAll=DM.insert (txId tx) tx (txmAll tm)}
+
 writeRecord :: (Monad m) => Transaction -> [Record r] -> r -> MVCCStateT m (Transaction,[Record r])
 writeRecord Transaction{..} _ _ | txStatus /= Started = error "Transaction has commited or aborted"
-writeRecord tx@Transaction{..} [] r = return (tx{txCreated=txCreated+1},[Record txId def r])
+writeRecord tx@Transaction{..} [] r = do
+    let tx2=tx{txCreated=txCreated+1}
+    updateActiveTransaction tx2
+    return (tx2,[Record txId def r])
 writeRecord tx records r = do
     tm <- get
-    return $ foldr (write tm) (tx,[]) records
+    let (tx2,rs) = foldr (write tm) (tx,[]) records
+    updateActiveTransaction tx2
+    return (tx2,rs)
     where
         write tm rec (tx1,recs) | not (isVisible tx1 tm rec) = (tx1,rec:recs)
         write _ rec (tx1@Transaction{..},recs) =
@@ -102,7 +112,9 @@ deleteRecord Transaction{..} _  | txStatus /= Started = error "Transaction has c
 deleteRecord tx [] = return (tx,[])
 deleteRecord tx records = do
     tm <- get
-    return $ foldr (write tm) (tx,[]) records
+    let (tx2,rs) = foldr (write tm) (tx,[]) records
+    updateActiveTransaction tx2
+    return (tx2,rs)
     where
         write tm rec (tx1,recs) | not (isVisible tx1 tm rec) = (tx1,rec:recs)
         write _ rec (tx1@Transaction{..},recs) =
