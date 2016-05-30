@@ -8,7 +8,8 @@ import Data.Int
 import Test.Hspec
 import qualified Data.Text as T
 import Data.Word
-
+import Control.Concurrent.Async
+import Control.Monad
 
 spec :: Spec
 spec = describe "Trie tests" $ do
@@ -127,6 +128,55 @@ spec = describe "Trie tests" $ do
             T.delete (toInt16 "inn") tr `shouldReturn`  Just 9
             T.lookup (toInt16 "in") tr `shouldReturn`  Just 5
             closeTrie tr
+  it "Works with multiple threads" $
+    withTempFile "trie" $ \f -> multiThread f Nothing
+  it "Works with multiple threads and free list " $
+    withTempFile "trie" $ \f ->
+        withTempFile "freelist" $ \fl -> multiThread f (Just fl)
+
+multiThread :: FilePath -> Maybe FilePath -> IO()
+multiThread f mfl = do
+    mt 50
+    mt 10
+  where
+    mt nb = do
+      tr <- openFileTrie f mfl
+      asyncs <- forM [1..nb] $ \n-> async $ 25 `timesDo` trieOp tr n
+      forM_ asyncs wait
+      T.lookup (toInt16 "A") tr `shouldReturn` Just 15
+      T.lookup (toInt16 "tea") tr `shouldReturn` Just 3
+      T.lookup (toInt16 "ted") tr `shouldReturn` Just 4
+      T.lookup (toInt16 "ten") tr `shouldReturn`Just 12
+      T.lookup (toInt16 "to") tr `shouldReturn` Just 7
+      T.lookup (toInt16 "in") tr `shouldReturn` Just 5
+      T.lookup (toInt16 "inn") tr `shouldReturn` Just 9
+      T.lookup (toInt16 "i") tr `shouldReturn`Just 11
+      T.lookup (toInt16 "none") tr `shouldReturn` Nothing
+      forM [1..nb] $ \n->
+        T.lookup (toInt16 (T.pack $ "nb" ++ show n)) tr `shouldReturn`Just n
+      closeTrie tr
+
+trieOp :: Trie Int16 Int16 -> Int16 -> IO ()
+trieOp tr n = do
+    T.delete (toInt16 "A") tr
+    T.delete (toInt16 "inn") tr
+    T.delete (toInt16 "tea") tr
+    T.delete (toInt16 "i") tr
+    T.delete (toInt16 "ted") tr
+    T.delete (toInt16 "ten") tr
+    T.delete (toInt16 "in") tr
+    T.delete (toInt16 "to") tr
+    T.delete (toInt16 (T.pack $ "nb" ++ show n)) tr
+    insert (toInt16 "A") 15 tr
+    insert (toInt16 "tea") 3 tr
+    insert (toInt16 "ted") 4 tr
+    insert (toInt16 "ten") 12 tr
+    insert (toInt16 "to") 7 tr
+    insert (toInt16 "in") 5 tr
+    insert (toInt16 "inn") 9 tr
+    insert (toInt16 (T.pack $ "nb" ++ show n)) n tr
+    insert (toInt16 "i") 11 tr
+    return ()
 
 -- | Convert a text to an array of int16
 toInt16 :: T.Text -> [Int16]

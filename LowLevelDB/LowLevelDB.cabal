@@ -70,7 +70,7 @@ test-suite test-LowLevelDB
         Database.LowLevelDB.Trie
         Database.LowLevelDB.TestUtils
         Database.LowLevelDB.TrieSpec
-    ghc-options: -ferror-spans -Wall
+    ghc-options: -ferror-spans -Wall -threaded -rtsopts -with-rtsopts=-N
 
 benchmark bench-LowLevelDB
     type: exitcode-stdio-1.0

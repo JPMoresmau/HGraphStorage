@@ -30,13 +30,14 @@ import System.Directory
 import Data.IORef
 import Control.Monad
 import Control.Monad.IO.Class (liftIO, MonadIO)
+import Control.Concurrent.MVar
 
 -- | Trie on disk
 data Trie k v = Trie
   { trHandle     :: MMapHandle (TrieNode k v) -- ^ The disk Handle
   , trRecordLength :: Int64 -- ^ The length of a record
   , trMax :: IORef Int64 -- ^ End offset
-  , trFreeList :: Maybe (FreeList Int64) -- ^ Optional free list to reuse offsets
+  , trFreeList :: Maybe (MVar (FreeList Int64)) -- ^ Optional free list to reuse offsets
   }
 
 -- | A Trie Node
@@ -87,14 +88,15 @@ openTrie h mfl = liftIO $ do
     let sz = fromIntegral $ FS.sizeOf (undefined::(TrieNode k v))
     tn <- peekMM h 0
     ioMx <- newIORef (max (tnNext tn) sz)
-    return $ Trie h sz ioMx mfl
+    mmv <- sequenceA $ fmap newMVar mfl
+    return $ Trie h sz ioMx mmv
 
 -- | Close the trie
 closeTrie :: (MonadIO m)=> Trie k v -> m ()
 closeTrie tr = do
     closeMmap $ trHandle tr
     case (trFreeList tr) of
-        Just fl -> void $ liftIO $ closeFreeList fl
+        Just mv -> liftIO $ withMVar mv $ \fl->void $ closeFreeList fl
         _ -> return ()
 
 -- | Insert a value if it does not exist in the tree
@@ -129,48 +131,53 @@ checkOff tr off = do
   where
     isz = fromIntegral $ trRecordLength tr
 
+withFreeList ::  Trie k v -> (Maybe (FreeList Int64) -> IO a) -> IO a
+withFreeList tr f =case trFreeList tr of
+    (Just mv) -> withMVar mv $ \fl -> f $ Just fl
+    Nothing -> f Nothing
+
 -- | Insert a value performing a given action if the key is already present
 insertValue :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v)
   => [k] -> v -> Trie k v
   -> (MMapHandle (TrieNode k v) -> (Int64,TrieNode k v) ->IO (Maybe v))
   -> IO (Maybe v)
-insertValue key val tr onExisting =
-  readRecord tr (trRecordLength tr) >>= insert' key
+insertValue key val tr onExisting = withFreeList tr $ \fl ->
+  readRecord tr (trRecordLength tr) >>= insert' fl key
   where
     h = trHandle tr
-    insert' [] _ = return Nothing
-    insert' (k:ks) Nothing = do
+    insert' _ [] _ = return Nothing
+    insert' fl (k:ks) Nothing = do
       let newC = TrieNode k (if null ks then val else def) def def
-      allsz <- getEmpty tr
+      allsz <- getEmpty tr fl
       pokeMM h newC (fromIntegral allsz)
-      insertChild ks (Just (allsz,newC))
-    insert' (k:ks) (Just (off,node)) =
+      insertChild fl ks (Just (allsz,newC))
+    insert' fl (k:ks) (Just (off,node)) =
       if k == tnKey node
         then case ks of
           [] -> onExisting h (off,node)
-          _ -> insertChild ks (Just (off,node))
+          _ -> insertChild fl ks (Just (off,node))
         else do
           mn <- readChildRecord tr $ tnNext node
           case mn of
-            Just n -> insert' (k:ks) $ Just n
+            Just n -> insert' fl (k:ks) $ Just n
             Nothing -> do
-              allsz <- getEmpty tr
+              allsz <- getEmpty tr fl
               let newN = TrieNode k (if null ks then val else def) def def
               pokeMM h newN (fromIntegral allsz)
               pokeMM h (node{tnNext=allsz}) (fromIntegral off)
-              insertChild ks (Just (allsz,newN))
-    insertChild [] _      = return Nothing
-    insertChild _ Nothing = return Nothing
-    insertChild ks@(k':ks') (Just (off,node)) = do
+              insertChild fl ks (Just (allsz,newN))
+    insertChild _ [] _      = return Nothing
+    insertChild _ _ Nothing = return Nothing
+    insertChild fl ks@(k':ks') (Just (off,node)) = do
       mc <- readChildRecord tr $ tnChild node
       case mc of
-        Just c -> insert' ks $ Just c
+        Just c -> insert' fl ks $ Just c
         Nothing -> do
-          allsz <- getEmpty tr
+          allsz <- getEmpty tr fl
           let newC = TrieNode k' (if null ks' then val else def) def def
           pokeMM h newC (fromIntegral allsz)
           pokeMM h (node{tnChild=allsz}) (fromIntegral off)
-          insertChild ks' (Just (allsz,newC))
+          insertChild fl ks' (Just (allsz,newC))
 
 -- | Read a given record
 readRecord :: (Storable k,Eq k,Storable v,Eq v,Default k,Default v) => Trie k v -> Int64 -> IO (Maybe (Int64,TrieNode k v))
@@ -191,8 +198,8 @@ readChildRecord tr off = readRecord tr off
 
 -- | Lookup a value from a key
 lookup :: (TrieConstraint k v m) => [k] -> Trie k v -> m (Maybe v)
-lookup key tr = do
-  mnode <- liftIO $ lookupNode key tr
+lookup key tr = liftIO $ withFreeList tr $ \_ -> do
+  mnode <- lookupNode key tr
   return $ case mnode of
     Just (_,node) ->
       let v=tnValue node
@@ -242,7 +249,7 @@ lookupNodes key tr = readRecord tr (trRecordLength tr) >>= \m-> lookup' key (may
 
 -- | Delete the value associated with a key
 delete :: forall k v m. (TrieConstraint k v m) => [k] -> Trie k v-> m (Maybe v)
-delete key tr = liftIO $ do
+delete key tr = liftIO $  withFreeList tr $ \fl -> do
   (mnode,steps) <- lookupNodes key tr
   case mnode of
     Just (off,node) -> do
@@ -252,7 +259,7 @@ delete key tr = liftIO $ do
           let (node'::TrieNode k v) = node{tnValue=def}
           pokeMM h node' $ fromIntegral off
           when (tnChild node' == def && off>trRecordLength tr) $
-            pruneTree (off,node) steps tr
+            pruneTree (off,node) steps tr fl
           return $ Just oldV
         else return Nothing
     _ -> return Nothing
@@ -260,8 +267,8 @@ delete key tr = liftIO $ do
     h = trHandle tr
 
 -- | Prune tree on delete
-pruneTree :: (Storable k,Storable v,Eq v,Default v)=>(Int64,TrieNode  k v) -> [Step k v] -> Trie k v ->IO ()
-pruneTree (off,node) steps tr = case trFreeList tr of
+pruneTree :: (Storable k,Storable v,Eq v,Default v)=>(Int64,TrieNode  k v) -> [Step k v] -> Trie k v -> Maybe (FreeList Int64) ->IO ()
+pruneTree (off,node) steps tr mfl = case mfl of
     Just fl -> addToFreeList off fl >> processSteps fl node steps
     _ -> return ()
     where
@@ -276,9 +283,9 @@ pruneTree (off,node) steps tr = case trFreeList tr of
             pokeMM h (nodes{tnNext=tnNext me}) $ fromIntegral offs
 
 -- | Get an empty offset
-getEmpty :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v) => Trie k v -> IO Int64
-getEmpty tr = do
-    moff <- case trFreeList tr of
+getEmpty :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v) => Trie k v -> Maybe (FreeList Int64) -> IO Int64
+getEmpty tr mfl = do
+    moff <- case mfl of
         Just fl -> getFromFreeList fl
         _ -> return Nothing
     case moff of
