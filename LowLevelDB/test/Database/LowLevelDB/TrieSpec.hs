@@ -10,6 +10,7 @@ import qualified Data.Text as T
 import Data.Word
 import Control.Concurrent.Async
 import Control.Monad
+import Data.Default
 
 spec :: Spec
 spec = describe "Trie tests" $ do
@@ -59,6 +60,9 @@ spec = describe "Trie tests" $ do
       T.delete (toInt16 "inn") tr `shouldReturn` Just 9
       T.delete (toInt16 "inn") tr `shouldReturn` Nothing
       closeTrie tr
+      tr2 :: (Trie Int16 Int16) <- openFileTrie f Nothing
+      T.lookup (toInt16 "A") tr2 `shouldReturn` Just 16
+      closeTrie tr2
   it "Collision test" $
      withTempFile "trie" $ \f -> do
       tr :: (Trie Int16 Int32) <- openFileTrie f Nothing
@@ -87,6 +91,19 @@ spec = describe "Trie tests" $ do
       prefix (toInt16 "t") tr `shouldReturn` [(toInt16 "tea",3),(toInt16 "ted",4),(toInt16 "to",7)]
       prefix [] tr `shouldReturn` [(toInt16 "A",15),(toInt16 "tea",3),(toInt16 "ted",4),(toInt16 "to",7)]
       closeTrie tr
+  it "Extra test" $
+    withTempFile "trie" $ \f -> do
+      tr :: (Trie Int16 Int16) <- openFileTrie f Nothing
+      insertNew (toInt16 "A") 15 tr `shouldReturn` Nothing
+      insertNew (toInt16 "tea") 3 tr `shouldReturn` Nothing
+      getExtra tr `shouldReturn` (def,def,def)
+      setExtra tr (1,2,3)
+      getExtra tr `shouldReturn` (1,2,3)
+      closeTrie tr
+      tr2 :: (Trie Int16 Int16) <- openFileTrie f Nothing
+      getExtra tr2 `shouldReturn` (1,2,3)
+      T.lookup (toInt16 "A") tr2 `shouldReturn` Just 15
+      closeTrie tr2
   it "Int64 keys as Word8" $
       withTempFile "trie" $ \f -> do
         tr :: (Trie Word8 Int16) <- openFileTrie f Nothing

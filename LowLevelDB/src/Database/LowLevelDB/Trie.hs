@@ -14,7 +14,9 @@ module Database.LowLevelDB.Trie
   , insert
   , Database.LowLevelDB.Trie.lookup
   , prefix
-  , delete)
+  , delete
+  , getExtra
+  , setExtra)
 where
 
 import Database.LowLevelDB.MMapHandle
@@ -95,9 +97,22 @@ openTrie h mfl = liftIO $ do
 closeTrie :: (MonadIO m)=> Trie k v -> m ()
 closeTrie tr = do
     closeMmap $ trHandle tr
-    case (trFreeList tr) of
+    case trFreeList tr of
         Just mv -> liftIO $ withMVar mv $ \fl->void $ closeFreeList fl
         _ -> return ()
+
+-- | Get extra info we can stuff in the trie
+getExtra ::  (TrieConstraint k v m)=> Trie k v -> m (k,v,Int64)
+getExtra tr = do
+    tn <- peekMM (trHandle tr) 0
+    return (tnKey tn,tnValue tn,tnChild tn)
+
+-- | Set extra info we can stuff in the trie
+setExtra ::  (TrieConstraint k v m)=> Trie k v -> (k,v,Int64) -> m ()
+setExtra tr (k,v,c)= do
+    tn <- peekMM (trHandle tr) 0
+    pokeMM (trHandle tr) (tn{tnKey= k,tnValue=v,tnChild=c}) 0
+
 
 -- | Insert a value if it does not exist in the tree
 -- if it exists, return the old value and does nothing
@@ -293,7 +308,8 @@ getEmpty tr mfl = do
         _ -> do
             mx<-atomicModifyIORef (trMax tr) (\mx->(mx+isz,mx))
             v <- readIORef (trMax tr)
-            pokeMM (trHandle tr) (TrieNode def def v def) 0
+            tn <- peekMM (trHandle tr) 0
+            pokeMM (trHandle tr) (tn{tnNext= v}) 0
             return mx
     where
         isz = fromIntegral $ trRecordLength tr
