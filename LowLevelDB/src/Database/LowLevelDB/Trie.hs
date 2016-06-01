@@ -1,8 +1,6 @@
 {-# LANGUAGE RankNTypes,ScopedTypeVariables,DeriveGeneric,GADTs,ConstraintKinds #-}
 -- | Trie saved to disk, using mmap
 --
--- <http://sqlity.net/en/2445/b-plus-tree>
---
 -- <http://en.wikipedia.org/wiki/Trie>
 module Database.LowLevelDB.Trie
   ( Trie (..)
@@ -292,7 +290,7 @@ pruneTree (off,node) steps tr mfl = case mfl of
         processSteps fl me (ChildOf (offp,nodep):st2)=do
             let myNext=tnNext me
             if myNext==def
-                then when (tnValue nodep == def) $ addToFreeList offp fl >> processSteps fl nodep st2
+                then when (tnValue nodep == def) $ (addToFreeList offp fl >> processSteps fl nodep st2)
                 else pokeMM h (nodep{tnChild=myNext}) $ fromIntegral offp
         processSteps _ me (NextOf (offs,nodes):_)=
             pokeMM h (nodes{tnNext=tnNext me}) $ fromIntegral offs

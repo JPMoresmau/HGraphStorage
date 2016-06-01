@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveFunctor,DeriveGeneric,FlexibleContexts,GeneralizedNewtypeDeriving,MultiParamTypeClasses,RecordWildCards #-}
+{-# LANGUAGE DeriveFunctor,DeriveGeneric,FlexibleContexts,GeneralizedNewtypeDeriving,MultiParamTypeClasses,RecordWildCards,ScopedTypeVariables #-}
 -- | MVCC implementation
 --
 -- <https://en.wikipedia.org/wiki/Multiversion_concurrency_control>
@@ -6,7 +6,9 @@ module Database.LowLevelDB.MVCC
     ( TransactionManager(..)
     , MemoryTransactionManager(..)
     , withTransactions
-    , newTransaction
+    , TrieTransactionManager(..)
+    , newTrieTransactionManager
+    , withPersistentTransactions
     , commit
     , rollback
     , Record(..)
@@ -15,20 +17,34 @@ module Database.LowLevelDB.MVCC
     , deleteRecord
     ) where
 
+import Database.LowLevelDB.Conversions
+import Database.LowLevelDB.Trie as Trie
+
 import Control.Applicative
 import Data.Default
 import Data.Maybe
 import Data.Typeable
 import GHC.Generics (Generic)
-
+import Foreign.Ptr
+import Foreign.Storable as FS
+import Foreign.Storable.Record  as Store
 import Data.Int
+import Data.Word
 import qualified Data.Set as DS
 import qualified Data.Map as DM
 
 import Control.Monad.State.Lazy
 
-data TransactionStatus = Started | Committed | Aborted
+data TransactionStatus = Idle | Started | Committed | Aborted
     deriving (Show,Read,Eq,Ord,Enum,Bounded,Typeable,Generic)
+
+instance Storable TransactionStatus where
+    sizeOf _ = 1
+    alignment _ = 8
+    peek ptr = do
+        i::Int8 <- FS.peek $ castPtr ptr
+        return $ toEnum $ fromIntegral i
+    poke ptr a = FS.poke (castPtr ptr) ((fromIntegral $ fromEnum a)::Int8)
 
 data Transaction = Transaction
     {txId :: Int64
@@ -37,6 +53,27 @@ data Transaction = Transaction
     , txCreated :: Int
     , txDeleted :: Int
     } deriving (Show,Read,Eq,Ord,Typeable,Generic)
+
+instance Default Transaction where
+    def = Transaction def Idle def def def
+
+-- | Storable dictionary
+storeTransaction :: Store.Dictionary Transaction
+storeTransaction = Store.run $
+  Transaction
+     <$> Store.element txId
+     <*> Store.element txStatus
+     <*> Store.element txCommittedID
+     <*> Store.element txCreated
+     <*> Store.element txDeleted
+
+-- | Storable instance
+instance Storable Transaction  where
+    sizeOf = Store.sizeOf storeTransaction
+    alignment = Store.alignment storeTransaction
+    peek = Store.peek storeTransaction
+    poke = Store.poke storeTransaction
+
 
 data MemoryTransactionManager = MemoryTransactionManager
     {txmActive :: DS.Set Int64
@@ -51,8 +88,6 @@ class (Monad m) => TransactionManager m where
     deleteTx :: Transaction -> m ()
     getTx :: Int64 -> m (Maybe Transaction)
 
---instance TransactionManager MemoryTransactionManager where
-
 
 data Record r = Record
     { rMin :: Int64
@@ -64,10 +99,10 @@ instance Default MemoryTransactionManager where
     def = MemoryTransactionManager DS.empty DM.empty 0
 
 
--- | Our monad transformer.
+-- | Our memory monad transformer.
 newtype MVCCStateT m a = Gs { uns :: StateT MemoryTransactionManager m a }
     deriving ( Functor, Applicative, Alternative, Monad
-             , MonadFix, MonadPlus, MonadTrans )
+             , MonadFix, MonadPlus, MonadTrans,MonadIO )
 
 instance (Monad m) => MonadState MemoryTransactionManager (MVCCStateT m) where
     get = Gs get
@@ -81,7 +116,7 @@ instance (Monad m) =>TransactionManager (MVCCStateT m) where
         return $ txmLast tm
     updateTx tx = do
         tm <- get
-        put tm{txmAll=DM.insert (txId tx) tx (txmAll tm)}
+        put tm{txmAll=DM.insert (txId tx) tx (txmAll tm),txmActive=DS.insert (txId tx) (txmActive tm)}
     getTx txId = do
         tm <- get
         return  $ DM.lookup txId $ txmAll tm
@@ -105,6 +140,60 @@ newTransaction  = do
         , txmAll = DM.insert next tx (txmAll tm)
         , txmLast=next}
     return tx
+
+data TrieTransactionManager = TrieTransactionManager
+    {ttxmActive :: DS.Set Int64
+    , ttxmTrie :: Trie Word8 Transaction
+    , ttxmLast :: Int64
+    } deriving (Typeable,Generic)
+
+newTrieTransactionManager :: (MonadIO m)=>Trie Word8 Transaction -> m TrieTransactionManager
+newTrieTransactionManager tr = do
+    (_,_,m)<-getExtra tr
+    return $ TrieTransactionManager def tr m
+
+-- | Our memory monad transformer.
+newtype MVCCTrieStateT m a = TGs { unts :: StateT TrieTransactionManager m a }
+    deriving ( Functor, Applicative, Alternative, Monad
+             , MonadFix, MonadPlus, MonadTrans,MonadIO )
+
+instance (Monad m) => MonadState TrieTransactionManager (MVCCTrieStateT m) where
+    get = TGs get
+    put = TGs . put
+    state = TGs . state
+
+withPersistentTransactions :: TrieTransactionManager -> MVCCTrieStateT m a -> m (a,TrieTransactionManager)
+withPersistentTransactions m st = runStateT (unts st) m
+
+instance (MonadIO m) =>TransactionManager (MVCCTrieStateT m) where
+    newTx = do
+        tm <- get
+        let next = ttxmLast tm + 1
+            tx = Transaction next Started def 0 0
+        void $ insert (toWord4s next) tx (ttxmTrie tm)
+        setExtra (ttxmTrie tm) (def,def,next)
+        put tm
+            { ttxmActive=DS.insert next (ttxmActive tm)
+            , ttxmLast=next}
+        return tx
+    lastID = do
+        tm <- get
+        return $ ttxmLast tm
+    updateTx tx = do
+        tm <- get
+        void $ insert (toWord4s (txId tx)) tx (ttxmTrie tm)
+        put tm
+            { ttxmActive=DS.insert (txId tx) (ttxmActive tm)
+            }
+    getTx txId = do
+        tm <- get
+        Trie.lookup (toWord4s txId) $ ttxmTrie tm
+    deleteTx tx= do
+        tm <- get
+        void $ if hasWritten tx
+                              then insert (toWord4s (txId tx)) tx (ttxmTrie tm)
+                              else delete (toWord4s (txId tx)) (ttxmTrie tm)
+        put tm{ttxmActive=DS.delete (txId tx) (ttxmActive tm)}
 
 commit :: (TransactionManager m) => Transaction -> m ()
 commit = closeTx Committed

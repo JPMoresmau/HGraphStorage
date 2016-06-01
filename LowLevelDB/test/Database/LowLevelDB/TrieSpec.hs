@@ -154,6 +154,7 @@ spec = describe "Trie tests" $ do
 multiThread :: FilePath -> Maybe FilePath -> IO()
 multiThread f mfl = do
     mt 50
+    mt 20
     mt 10
   where
     mt nb = do
