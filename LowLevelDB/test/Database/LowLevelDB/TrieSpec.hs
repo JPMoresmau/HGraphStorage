@@ -11,6 +11,7 @@ import Data.Word
 import Control.Concurrent.Async
 import Control.Monad
 import Data.Default
+import System.Directory
 
 spec :: Spec
 spec = describe "Trie tests" $ do
@@ -144,7 +145,23 @@ spec = describe "Trie tests" $ do
             insertNew (toInt16 "inn") 9 tr `shouldReturn` Nothing
             T.delete (toInt16 "inn") tr `shouldReturn`  Just 9
             T.lookup (toInt16 "in") tr `shouldReturn`  Just 5
+            insertNew (toInt16 "other") 5 tr `shouldReturn` Nothing
+            T.lookup (toInt16 "in") tr `shouldReturn`  Just 5
+            T.lookup (toInt16 "i") tr `shouldReturn` Nothing
             closeTrie tr
+            removeFile f
+            removeFile fl
+            tr2 :: (Trie Int16 Int16) <- openFileTrie f (Just fl)
+            insertNew (toInt16 "in") 5 tr2 `shouldReturn` Nothing
+            insertNew (toInt16 "inn") 9 tr2 `shouldReturn` Nothing
+            T.delete (toInt16 "inn") tr2 `shouldReturn`  Just 9
+            insertNew (toInt16 "o") 20 tr2 `shouldReturn` Nothing
+            T.lookup (toInt16 "in") tr2 `shouldReturn`  Just 5
+            T.lookup (toInt16 "i") tr2 `shouldReturn` Nothing
+            T.lookup (toInt16 "inn") tr2 `shouldReturn` Nothing
+            T.lookup (toInt16 "o") tr2 `shouldReturn` Just 20
+            T.lookup (toInt16 "ino") tr2 `shouldReturn` Nothing
+            closeTrie tr2
   it "Works with multiple threads" $
     withTempFile "trie" $ \f -> multiThread f Nothing
   it "Works with multiple threads and free list " $

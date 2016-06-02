@@ -226,7 +226,6 @@ lookup key tr = liftIO $ withFreeList tr $ \_ -> do
 lookupNode :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v) => [k] -> Trie k v -> IO (Maybe (Int64, TrieNode k v))
 lookupNode key tr = fst <$> lookupNodes key tr
 
-
 -- | Return all key and values for the given prefix which may be null (in which case all mappings are returned).
 prefix :: (TrieConstraint k v m) => [k] -> Trie k v -> m [([k],v)]
 prefix key tr = liftIO $ lookupNode key tr >>= collect (null key) key
@@ -247,7 +246,7 @@ data Step k v = ChildOf (Int64,TrieNode k v) | NextOf (Int64,TrieNode k v)
 
 -- | Lookup a node from a Key, keeping all the steps in the process
 lookupNodes :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v) => [k] -> Trie k v -> IO (Maybe (Int64, TrieNode k v),[Step k v])
-lookupNodes key tr = readRecord tr (trRecordLength tr) >>= \m-> lookup' key (maybe [] (\a->[ChildOf a]) m) m
+lookupNodes key tr = readRecord tr (trRecordLength tr) >>= \m-> lookup' key [] m
   where
     lookup' [] steps r = return (r,steps)
     lookup' _ steps Nothing = return (Nothing,steps)
@@ -289,9 +288,9 @@ pruneTree (off,node) steps tr mfl = case mfl of
         processSteps _ _ [] = return ()
         processSteps fl me (ChildOf (offp,nodep):st2)=do
             let myNext=tnNext me
-            if myNext==def
-                then when (tnValue nodep == def) $ (addToFreeList offp fl >> processSteps fl nodep st2)
-                else pokeMM h (nodep{tnChild=myNext}) $ fromIntegral offp
+                nodep2 = nodep{tnChild=myNext}
+            pokeMM h nodep2 $ fromIntegral offp
+            when (myNext==def && tnValue nodep2 == def) (addToFreeList offp fl >> processSteps fl nodep2 st2)
         processSteps _ me (NextOf (offs,nodes):_)=
             pokeMM h (nodes{tnNext=tnNext me}) $ fromIntegral offs
 
