@@ -20,7 +20,7 @@ where
 
 import Database.LowLevelDB.MMapHandle
 import Database.LowLevelDB.FreeList
-import Data.Int (Int64)
+import Data.Word
 import Data.Typeable
 import GHC.Generics (Generic)
 import Foreign.Storable as FS
@@ -36,17 +36,17 @@ import Control.Concurrent.MVar
 -- | Trie on disk
 data Trie k v = Trie
   { trHandle     :: MMapHandle (TrieNode k v) -- ^ The disk Handle
-  , trRecordLength :: Int64 -- ^ The length of a record
-  , trMax :: IORef Int64 -- ^ End offset
-  , trFreeList :: Maybe (MVar (FreeList Int64)) -- ^ Optional free list to reuse offsets
+  , trRecordLength :: Word64 -- ^ The length of a record
+  , trMax :: IORef Word64 -- ^ End offset
+  , trFreeList :: Maybe (MVar (FreeList Word64)) -- ^ Optional free list to reuse offsets
   }
 
 -- | A Trie Node
 data TrieNode k v =  TrieNode
   { tnKey       :: k     -- ^ the key (def for nothing)
   , tnValue     :: v     -- ^ the value (def for nothing)
-  , tnNext      :: Int64 -- ^ the offset of next sibling (def for nothing)
-  , tnChild     :: Int64 -- ^ the offset of first child (def for nothing)
+  , tnNext      :: Word64 -- ^ the offset of next sibling (def for nothing)
+  , tnChild     :: Word64 -- ^ the offset of first child (def for nothing)
   } deriving (Show,Read,Eq,Ord,Typeable,Generic)
 
 -- | Storable dictionary
@@ -79,12 +79,12 @@ openFileTrie file mflf = liftIO $ do
   let dir = takeDirectory file
   createDirectoryIfMissing True dir
   h<- openMmap file (0,4096) def
-  mfl <- sequenceA $ fmap (\flf->newFileFreeList flf (1::Int64)) mflf
+  mfl <- sequenceA $ fmap (\flf->newFileFreeList flf (1::Word64)) mflf
   openTrie h mfl
 
 
 -- | Create a new trie with a given handle and an optional free list
-openTrie :: forall k v m . (TrieConstraint k v m) => MMapHandle (TrieNode k v) -> Maybe (FreeList Int64) -> m (Trie k v)
+openTrie :: forall k v m . (TrieConstraint k v m) => MMapHandle (TrieNode k v) -> Maybe (FreeList Word64) -> m (Trie k v)
 openTrie h mfl = liftIO $ do
     let sz = fromIntegral $ FS.sizeOf (undefined::(TrieNode k v))
     tn <- peekMM h 0
@@ -101,13 +101,13 @@ closeTrie tr = do
         _ -> return ()
 
 -- | Get extra info we can stuff in the trie
-getExtra ::  (TrieConstraint k v m)=> Trie k v -> m (k,v,Int64)
+getExtra ::  (TrieConstraint k v m)=> Trie k v -> m (k,v,Word64)
 getExtra tr = do
     tn <- peekMM (trHandle tr) 0
     return (tnKey tn,tnValue tn,tnChild tn)
 
 -- | Set extra info we can stuff in the trie
-setExtra ::  (TrieConstraint k v m)=> Trie k v -> (k,v,Int64) -> m ()
+setExtra ::  (TrieConstraint k v m)=> Trie k v -> (k,v,Word64) -> m ()
 setExtra tr (k,v,c)= do
     tn <- peekMM (trHandle tr) 0
     pokeMM (trHandle tr) (tn{tnKey= k,tnValue=v,tnChild=c}) 0
@@ -138,14 +138,14 @@ insert key val tr = liftIO $ insertValue key val tr $ \h (off,node) -> do
       else Nothing
 
 -- | Check if the offset is over the current maximum, and updates the maximum if it is
-checkOff :: Trie k v  -> Int64 -> IO()
+checkOff :: Trie k v  -> Word64 -> IO()
 checkOff tr off = do
     v <- readIORef (trMax tr)
     when (off>v) $ void $ atomicModifyIORef (trMax tr) (\mx->(off+isz,mx))
   where
     isz = fromIntegral $ trRecordLength tr
 
-withFreeList ::  Trie k v -> (Maybe (FreeList Int64) -> IO a) -> IO a
+withFreeList ::  Trie k v -> (Maybe (FreeList Word64) -> IO a) -> IO a
 withFreeList tr f =case trFreeList tr of
     (Just mv) -> withMVar mv $ \fl -> f $ Just fl
     Nothing -> f Nothing
@@ -153,7 +153,7 @@ withFreeList tr f =case trFreeList tr of
 -- | Insert a value performing a given action if the key is already present
 insertValue :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v)
   => [k] -> v -> Trie k v
-  -> (MMapHandle (TrieNode k v) -> (Int64,TrieNode k v) ->IO (Maybe v))
+  -> (MMapHandle (TrieNode k v) -> (Word64,TrieNode k v) ->IO (Maybe v))
   -> IO (Maybe v)
 insertValue key val tr onExisting = withFreeList tr $ \fl ->
   readRecord tr (trRecordLength tr) >>= insert' fl key
@@ -194,7 +194,7 @@ insertValue key val tr onExisting = withFreeList tr $ \fl ->
           insertChild fl ks' (Just (allsz,newC))
 
 -- | Read a given record
-readRecord :: (Storable k,Eq k,Storable v,Eq v,Default k,Default v) => Trie k v -> Int64 -> IO (Maybe (Int64,TrieNode k v))
+readRecord :: (Storable k,Eq k,Storable v,Eq v,Default k,Default v) => Trie k v -> Word64 -> IO (Maybe (Word64,TrieNode k v))
 readRecord tr off = do
     tn <- peekMM h (fromIntegral off)
     if tn == def
@@ -205,7 +205,7 @@ readRecord tr off = do
 
 
 -- | Read a given record whose offset must be greater than 0
-readChildRecord :: (TrieConstraint k v m) => Trie k v -> Int64 -> m (Maybe (Int64,TrieNode k v))
+readChildRecord :: (TrieConstraint k v m) => Trie k v -> Word64 -> m (Maybe (Word64,TrieNode k v))
 readChildRecord _ 0 = return Nothing
 readChildRecord tr off = liftIO $ readRecord tr off
 
@@ -224,7 +224,7 @@ lookup key tr = liftIO $ withFreeList tr $ \_ -> do
 
 
 -- | Lookup a node from a Key
-lookupNode :: (TrieConstraint k v m) => [k] -> Trie k v -> m (Maybe (Int64, TrieNode k v))
+lookupNode :: (TrieConstraint k v m) => [k] -> Trie k v -> m (Maybe (Word64, TrieNode k v))
 lookupNode key tr = fst <$> (liftIO $ lookupNodes key tr)
 
 -- | Return all key and values for the given prefix which may be null (in which case all mappings are returned).
@@ -251,11 +251,11 @@ prefixF filt key tr = lookupNode key tr >>= collect (null key) key
 
 
 -- | Step in the look
-data Step k v = ChildOf (Int64,TrieNode k v) | NextOf (Int64,TrieNode k v)
+data Step k v = ChildOf (Word64,TrieNode k v) | NextOf (Word64,TrieNode k v)
     deriving (Show)
 
 -- | Lookup a node from a Key, keeping all the steps in the process
-lookupNodes :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v) => [k] -> Trie k v -> IO (Maybe (Int64, TrieNode k v),[Step k v])
+lookupNodes :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v) => [k] -> Trie k v -> IO (Maybe (Word64, TrieNode k v),[Step k v])
 lookupNodes key tr = readRecord tr (trRecordLength tr) >>= \m-> lookup' key [] m
   where
     lookup' [] steps r = return (r,steps)
@@ -289,7 +289,7 @@ delete key tr = liftIO $  withFreeList tr $ \fl -> do
     h = trHandle tr
 
 -- | Prune tree on delete
-pruneTree :: (Storable k,Storable v,Eq v,Default v)=>(Int64,TrieNode  k v) -> [Step k v] -> Trie k v -> Maybe (FreeList Int64) ->IO ()
+pruneTree :: (Storable k,Storable v,Eq v,Default v)=>(Word64,TrieNode  k v) -> [Step k v] -> Trie k v -> Maybe (FreeList Word64) ->IO ()
 pruneTree (off,node) steps tr mfl = case mfl of
     Just fl -> addToFreeList off fl >> processSteps fl node steps
     _ -> return ()
@@ -305,7 +305,7 @@ pruneTree (off,node) steps tr mfl = case mfl of
             pokeMM h (nodes{tnNext=tnNext me}) $ fromIntegral offs
 
 -- | Get an empty offset
-getEmpty :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v) => Trie k v -> Maybe (FreeList Int64) -> IO Int64
+getEmpty :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v) => Trie k v -> Maybe (FreeList Word64) -> IO Word64
 getEmpty tr mfl = do
     moff <- case mfl of
         Just fl -> getFromFreeList fl

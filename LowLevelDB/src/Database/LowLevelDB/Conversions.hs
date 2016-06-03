@@ -11,11 +11,69 @@ module Database.LowLevelDB.Conversions
  , tripleFromWord4s
  , toBits
  , fromBits
+ , TxKey(..)
  )where
 
 import Data.List
 import Data.Word
 import Data.Bits
+import Data.Int
+
+class TxKey a where
+    keyPrefix :: a -> [Word8]
+    toKey :: (a,Word64) -> [Word8]
+    fromKey :: [Word8] -> (a,Word64)
+
+
+instance TxKey Word64 where
+    keyPrefix = intPrefix
+    toKey = intToKey
+    fromKey  = foldr unstep (0,0)
+       where
+          unstep b (a,c)
+            | b==intSeparator = (c,a)
+            | otherwise = (a`shiftL` 4 .|. fromIntegral b,c)
+
+instance TxKey Word32 where
+    keyPrefix = intPrefix
+    toKey = intToKey
+    fromKey = intFromKey
+
+instance TxKey Int64 where
+    keyPrefix = intPrefix
+    toKey = intToKey
+    fromKey = intFromKey
+
+instance TxKey Int32 where
+    keyPrefix = intPrefix
+    toKey = intToKey
+    fromKey = intFromKey
+
+instance TxKey Int where
+    keyPrefix = intPrefix
+    toKey = intToKey
+    fromKey = intFromKey
+
+-- | Separator between key and transaction id
+-- since we map on 4 bytes, 16 is outside the range and is a recognizable separator
+intSeparator :: Word8
+intSeparator = 16
+
+intPrefix :: (Integral a, Bits a) =>  a -> [Word8]
+intPrefix a= toWord4s a ++ [intSeparator]
+
+intToKey :: (Integral a, Bits a) => (a,Word64) -> [Word8]
+intToKey (a,k) = intPrefix a ++ toWord4s k
+
+intFromKey :: (Integral a, Bits a) =>  [Word8] -> (a,Word64)
+intFromKey  ls =
+        let (a,b,_) = foldr unstep (0,0,False) ls
+        in (a,b)
+       where
+          unstep b (a,c,fl)
+            | b == intSeparator = (a,c,True)
+            | fl = (a `shiftL` 4 .|. fromIntegral b,c,fl)
+            | otherwise= (a,c`shiftL` 4 .|. fromIntegral b,fl)
 
 -- | Convert an integral into an array of Word8
 toWord8s :: (Integral a, Bits a) =>  a -> [Word8]

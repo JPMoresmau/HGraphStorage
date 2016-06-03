@@ -48,9 +48,9 @@ instance Storable TransactionStatus where
     poke ptr a = FS.poke (castPtr ptr) ((fromIntegral $ fromEnum a)::Int8)
 
 data Transaction = Transaction
-    {txId :: Int64
+    {txId :: Word64
     , txStatus :: TransactionStatus
-    , txCommittedID :: Int64
+    , txCommittedID :: Word64
     , txCreated :: Int
     , txDeleted :: Int
     } deriving (Show,Read,Eq,Ord,Typeable,Generic)
@@ -77,22 +77,22 @@ instance Storable Transaction  where
 
 
 data MemoryTransactionManager = MemoryTransactionManager
-    {txmActive :: DS.Set Int64
-    , txmAll :: DM.Map Int64 Transaction
-    , txmLast :: Int64
+    {txmActive :: DS.Set Word64
+    , txmAll :: DM.Map Word64 Transaction
+    , txmLast :: Word64
     } deriving (Show,Read,Eq,Ord,Typeable,Generic)
 
 class (Monad m) => TransactionManager m where
     newTx :: m Transaction
-    lastID :: m Int64
+    lastID :: m Word64
     updateTx :: Transaction -> m ()
     deleteTx :: Transaction -> m ()
-    getTx :: Int64 -> m (Maybe Transaction)
+    getTx :: Word64 -> m (Maybe Transaction)
 
 
 data Record r = Record
-    { rMin :: Int64
-    , rMax :: Int64
+    { rMin :: Word64
+    , rMax :: Word64
     , rValue :: r
     } deriving (Show,Read,Eq,Ord,Typeable,Generic)
 
@@ -143,9 +143,9 @@ newTransaction  = do
     return tx
 
 data TrieTransactionManager = TrieTransactionManager
-    {ttxmActive :: DS.Set Int64
+    {ttxmActive :: DS.Set Word64
     , ttxmTrie :: Trie Word8 Transaction
-    , ttxmLast :: Int64
+    , ttxmLast :: Word64
     } deriving (Typeable,Generic)
 
 newTrieTransactionManager :: (MonadIO m)=>Trie Word8 Transaction -> m TrieTransactionManager
@@ -250,7 +250,7 @@ readRecord tx records = do
     vis<-filterM (isVisible tx) records -- visible records
     return $ listToMaybe vis
 
-isCommittedBefore :: (TransactionManager m) => Transaction -> Int64 -> m Bool
+isCommittedBefore :: (TransactionManager m) => Transaction -> Word64 -> m Bool
 isCommittedBefore _ tId | tId==def  = return False
 isCommittedBefore tx tId = do
     mtx <- getTx  tId
