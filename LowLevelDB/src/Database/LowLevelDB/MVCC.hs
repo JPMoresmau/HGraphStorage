@@ -12,6 +12,7 @@ module Database.LowLevelDB.MVCC
     , commit
     , rollback
     , Record(..)
+    , Transaction(..)
     , readRecord
     , writeRecord
     , deleteRecord
@@ -204,44 +205,44 @@ rollback = closeTx Aborted
 updateActiveTransaction :: (TransactionManager m)=> Transaction -> m ()
 updateActiveTransaction tx = updateTx tx
 
-writeRecord :: (TransactionManager m) => Transaction -> [Record r] -> r -> m (Transaction,[Record r])
+writeRecord :: (TransactionManager m) => Transaction -> [Record r] -> r -> m (Transaction,[Record r],[Record r])
 writeRecord Transaction{..} _ _ | txStatus /= Started = error "Transaction has commited or aborted"
 writeRecord tx@Transaction{..} [] r = do
     let tx2=tx{txCreated=txCreated+1}
     updateActiveTransaction tx2
-    return (tx2,[Record txId def r])
+    return (tx2,[Record txId def r],[Record txId def r])
 writeRecord tx records r = do
     vis <- mapM (\r2->do
         v<-isVisible tx r2
         return (r2,v))records
-    let (tx2,rs) = foldr write (tx,[]) vis
+    let (tx2,rs,mods) = foldr write (tx,[],[]) vis
     updateActiveTransaction tx2
-    return (tx2,rs)
+    return (tx2,rs,mods)
     where
-        write (rec,vis) (tx1,recs) | vis==False = (tx1,rec:recs)
-        write (rec,_) (tx1@Transaction{..},recs) =
+        write (rec,vis) (tx1,recs,mods) | vis==False = (tx1,rec:recs,rec:mods)
+        write (rec,_) (tx1@Transaction{..},recs,mods) =
             let mn= rMin rec
                 mine = txId == mn
                 newRecs = if mine then [rec{rValue=r,rMax=def}] else [Record txId def r,rec{rMax=txId}]
-            in (tx1{txCreated=txCreated+1,txDeleted=txDeleted+1},newRecs++recs)
+            in (tx1{txCreated=txCreated+1,txDeleted=txDeleted+1},newRecs++recs,newRecs++mods)
 
-deleteRecord :: (TransactionManager m) => Transaction -> [Record r] -> m (Transaction,[Record r])
+deleteRecord :: (TransactionManager m) => Transaction -> [Record r] -> m (Transaction,[Record r],[Record r])
 deleteRecord Transaction{..} _  | txStatus /= Started = error "Transaction has commited or aborted"
-deleteRecord tx [] = return (tx,[])
+deleteRecord tx [] = return (tx,[],[])
 deleteRecord tx records = do
     vis <- mapM (\r->do
         v<-isVisible tx r
         return (r,v))records
-    let (tx2,rs) = foldr write (tx,[]) vis
+    let (tx2,rs,mods) = foldr write (tx,[],[]) vis
     updateActiveTransaction tx2
-    return (tx2,rs)
+    return (tx2,rs,mods)
     where
-        write (rec,vis) (tx1,recs) | vis == False = (tx1,rec:recs)
-        write (rec,_) (tx1@Transaction{..},recs) =
+        write (rec,vis) (tx1,recs,mods) | vis == False = (tx1,rec:recs,mods)
+        write (rec,_) (tx1@Transaction{..},recs,mods) =
             let mn= rMin rec
                 mine = txId == mn
                 newRecs = if mine then [] else [rec{rMax=txId}]
-            in (tx1{txDeleted=txDeleted+1},newRecs++recs)
+            in (tx1{txDeleted=txDeleted+1},newRecs++recs,newRecs++mods)
 
 readRecord :: (TransactionManager m) => Transaction -> [Record r] -> m (Maybe (Record r))
 readRecord _ [] = return Nothing
@@ -267,6 +268,7 @@ isVisible tx@Transaction{..} Record{..}= do
     return $ (rMin == txId -- inserted by current transaction
                         && (rMax==def)) -- not deleted
                     || (minCB -- inserted by a commited transaction
+                        && rMax /= txId -- not deleted by current transaction
                         && (rMax == def -- not deleted
                             || not maxCB)) -- deleted by a transaction not committed
 

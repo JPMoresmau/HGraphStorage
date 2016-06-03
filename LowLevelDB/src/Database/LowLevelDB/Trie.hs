@@ -12,6 +12,7 @@ module Database.LowLevelDB.Trie
   , insert
   , Database.LowLevelDB.Trie.lookup
   , prefix
+  , prefixF
   , delete
   , getExtra
   , setExtra)
@@ -204,9 +205,9 @@ readRecord tr off = do
 
 
 -- | Read a given record whose offset must be greater than 0
-readChildRecord :: (Storable k,Storable v,Eq k,Eq v,Default k,Default v) => Trie k v -> Int64 -> IO (Maybe (Int64,TrieNode k v))
+readChildRecord :: (TrieConstraint k v m) => Trie k v -> Int64 -> m (Maybe (Int64,TrieNode k v))
 readChildRecord _ 0 = return Nothing
-readChildRecord tr off = readRecord tr off
+readChildRecord tr off = liftIO $ readRecord tr off
 
 
 -- | Lookup a value from a key
@@ -223,22 +224,31 @@ lookup key tr = liftIO $ withFreeList tr $ \_ -> do
 
 
 -- | Lookup a node from a Key
-lookupNode :: (Storable k,Eq k,Default k,Storable v,Eq v,Default v) => [k] -> Trie k v -> IO (Maybe (Int64, TrieNode k v))
-lookupNode key tr = fst <$> lookupNodes key tr
+lookupNode :: (TrieConstraint k v m) => [k] -> Trie k v -> m (Maybe (Int64, TrieNode k v))
+lookupNode key tr = fst <$> (liftIO $ lookupNodes key tr)
 
 -- | Return all key and values for the given prefix which may be null (in which case all mappings are returned).
 prefix :: (TrieConstraint k v m) => [k] -> Trie k v -> m [([k],v)]
-prefix key tr = liftIO $ lookupNode key tr >>= collect (null key) key
+prefix = prefixF (\_ _ -> return True)
+
+-- | Return all key and values for the given prefix which may be null (in which case all mappings are returned).
+prefixF :: (TrieConstraint k v m) => ([k] -> v -> m Bool) -> [k] -> Trie k v -> m [([k],v)]
+prefixF filt key tr = lookupNode key tr >>= collect (null key) key
   where
     collect _ _ Nothing = return []
     collect withNexts k (Just (_,node)) = do
       let k' = tnKey node
       let v = tnValue node
       let nk = if withNexts then k++[k'] else k
-      let me = if v == def then [] else [(nk,v)]
+      me <- if v == def
+                        then return []
+                        else do
+                            ok <- filt nk v
+                            return $ if ok then [(nk,v)] else []
       subs <- readChildRecord tr (tnChild node) >>= collect True nk
       nexts <- if withNexts then readChildRecord tr (tnNext node) >>= collect True k else return []
       return $ me ++ subs ++ nexts
+
 
 -- | Step in the look
 data Step k v = ChildOf (Int64,TrieNode k v) | NextOf (Int64,TrieNode k v)

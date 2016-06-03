@@ -91,6 +91,8 @@ spec = describe "Trie tests" $ do
       prefix (toInt16 "te") tr `shouldReturn` [(toInt16 "tea",3),(toInt16 "ted",4)]
       prefix (toInt16 "t") tr `shouldReturn` [(toInt16 "tea",3),(toInt16 "ted",4),(toInt16 "to",7)]
       prefix [] tr `shouldReturn` [(toInt16 "A",15),(toInt16 "tea",3),(toInt16 "ted",4),(toInt16 "to",7)]
+      prefixF (\_ v->return (v>6)) [] tr `shouldReturn` [(toInt16 "A",15),(toInt16 "to",7)]
+      prefixF (\k _->return (length k ==3)) [] tr `shouldReturn` [(toInt16 "tea",3),(toInt16 "ted",4)]
       closeTrie tr
   it "Extra test" $
     withTempFile "trie" $ \f -> do
