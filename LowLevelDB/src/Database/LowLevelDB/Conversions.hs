@@ -5,10 +5,6 @@ module Database.LowLevelDB.Conversions
  , fromWord8s
  , toWord4s
  , fromWord4s
- , tupleToWord4s
- , tupleFromWord4s
- , tripleToWord4s
- , tripleFromWord4s
  , toBits
  , fromBits
  , TxKey(..)
