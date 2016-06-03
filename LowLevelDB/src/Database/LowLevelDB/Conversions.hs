@@ -1,5 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
--- | Conversions methods
+-- | Conversions methods, between user types and a format suitable for Tries and TxTries
 module Database.LowLevelDB.Conversions
  ( toWord8s
  , fromWord8s
@@ -15,12 +15,16 @@ import Data.Word
 import Data.Bits
 import Data.Int
 
+-- | Class for keys usable in a TxTrie (in conjunction with a transaction id)
 class TxKey a where
+    -- | get the prefix for the key without the transaction id
     keyPrefix :: a -> [Word8]
+    -- | get the full key data for key and transaction id
     toKey :: (a,Word64) -> [Word8]
+    -- | get the key and transaction id from the data
     fromKey :: [Word8] -> (a,Word64)
 
-
+-- | Word64 TxKey instance
 instance TxKey Word64 where
     keyPrefix = intPrefix
     toKey = intToKey
@@ -30,21 +34,25 @@ instance TxKey Word64 where
             | b==intSeparator = (c,a)
             | otherwise = (a`shiftL` 4 .|. fromIntegral b,c)
 
+-- | Word32 TxKey instance
 instance TxKey Word32 where
     keyPrefix = intPrefix
     toKey = intToKey
     fromKey = intFromKey
 
+-- | Int64 TxKey instance
 instance TxKey Int64 where
     keyPrefix = intPrefix
     toKey = intToKey
     fromKey = intFromKey
 
+-- | Int32 TxKey instance
 instance TxKey Int32 where
     keyPrefix = intPrefix
     toKey = intToKey
     fromKey = intFromKey
 
+-- | Int TxKey instance
 instance TxKey Int where
     keyPrefix = intPrefix
     toKey = intToKey
@@ -55,12 +63,15 @@ instance TxKey Int where
 intSeparator :: Word8
 intSeparator = 16
 
+-- | Key Prefix implementation for integrals
 intPrefix :: (Integral a, Bits a) =>  a -> [Word8]
 intPrefix a= toWord4s a ++ [intSeparator]
 
+-- | Key Data implementation for integrals
 intToKey :: (Integral a, Bits a) => (a,Word64) -> [Word8]
 intToKey (a,k) = intPrefix a ++ toWord4s k
 
+-- | Key data to Key and Transaction ID for integrals
 intFromKey :: (Integral a, Bits a) =>  [Word8] -> (a,Word64)
 intFromKey  ls =
         let (a,b,_) = foldr unstep (0,0,False) ls
@@ -83,18 +94,6 @@ toBits = to 1 1
 toWord4s :: (Integral a, Bits a) =>  a -> [Word8]
 toWord4s = to 15 4
 
-tupleToWord4s :: (Integral a, FiniteBits a,Integral b,Bits b) => (a,b) -> [Word8]
-tupleToWord4s (a,b) =
-    let i::Integer = (fromIntegral b `shiftL` finiteBitSize a) + fromIntegral a
-    in to 15 4 i
-
-tripleToWord4s :: (Integral a, FiniteBits a,Integral b,FiniteBits b) => (a,b,b) -> [Word8]
-tripleToWord4s (a,b,c) =
-    let
-        sh = finiteBitSize a
-        i::Integer = (fromIntegral c `shiftL` (finiteBitSize b + sh)) + (fromIntegral b `shiftL` sh) + fromIntegral a
-    in to 15 4 i
-
 -- | Converts by masking and shifting
 to ::  (Integral a, Bits a) =>  a -> Int -> a -> [Word8]
 to _ _ a | a<0 = error "cannot convert negative numbers"
@@ -111,36 +110,6 @@ fromWord8s = from 8
 fromWord4s :: (Num a,Bits a)=> [Word8] -> a
 fromWord4s  = from 4
 
-tupleFromWord4s :: forall a b.(Integral a,FiniteBits a,Integral b,Bits b)=> [Word8] ->  (a,b)
-tupleFromWord4s  ls =
-    let
-        i::Integer = from 4 ls
-        a =fromInteger (i `shiftR` l undefined)
-        b = fromInteger (i .&. toInteger oneBits)
-    in (b,a)
-    where
-        l :: a -> Int
-        l = finiteBitSize
-        oneBits :: a
-        oneBits = complement zeroBits
-
-tripleFromWord4s :: forall a b.(Integral a,FiniteBits a,Integral b,FiniteBits b)=> [Word8] ->  (a,b,b)
-tripleFromWord4s  ls =
-    let
-        i::Integer = from 4 ls
-        a =fromInteger ((i `shiftR` la undefined) .&. toInteger oneBitsb)
-        c =fromInteger (i `shiftR` (la undefined+lb undefined))
-        b = fromInteger (i .&. toInteger oneBitsa)
-    in (b,a,c)
-    where
-        la :: a -> Int
-        la = finiteBitSize
-        lb :: b -> Int
-        lb = finiteBitSize
-        oneBitsa :: a
-        oneBitsa = complement zeroBits
-        oneBitsb :: b
-        oneBitsb = complement zeroBits
 
 -- | Convert an array of Word8 representing a bit into an integral
 fromBits :: (Num a,Bits a)=> [Word8] -> a

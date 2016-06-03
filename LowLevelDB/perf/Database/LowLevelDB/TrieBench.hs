@@ -21,7 +21,7 @@ benchTrieWordsValue16 f wrds= do
     resetFile f
     tr :: (Trie Int16 Int16) <- openFileTrie f Nothing
     res<-foldM (\c (w,i)->insertNew (toInt16 w) i tr >> return (c+1)) 0 $ zip wrds [0..]
-    closeMmap $ trHandle tr
+    closeTrie tr
     return res
 
 benchTrieWordsValue32 :: FilePath -> [T.Text] -> IO Int
@@ -29,7 +29,7 @@ benchTrieWordsValue32 f wrds= do
     resetFile f
     tr :: (Trie Int16 Int32) <- openFileTrie f Nothing
     res<-foldM (\c (w,i)->insertNew (toInt16 w) i tr >> return (c+1)) 0 $ zip wrds [0..]
-    closeMmap $ trHandle tr
+    closeTrie tr
     return res
 
 benchTrieWordsValue64 :: FilePath -> [T.Text] -> IO Int
@@ -37,7 +37,7 @@ benchTrieWordsValue64 f wrds= do
     resetFile f
     tr :: (Trie Int16 Int64) <- openFileTrie f Nothing
     res<-foldM (\c (w,i)->insertNew (toInt16 w) i tr >> return (c+1)) 0 $ zip wrds [0..]
-    closeMmap $ trHandle tr
+    closeTrie tr
     return res
 
 benchTrieInt64AsWord8s :: FilePath -> [T.Text] -> IO Int
@@ -48,7 +48,7 @@ benchInt64 conv f wrds= do
     resetFile f
     tr :: (Trie Word8 Int64) <- openFileTrie f Nothing
     res<-foldM (\c (_,i)->insertNew (conv i) i tr >> return (c+1)) 0 $ zip wrds [0..]
-    closeMmap $ trHandle tr
+    closeTrie tr
     return res
 
 benchTrieInt64AsBits :: FilePath -> [T.Text] -> IO Int

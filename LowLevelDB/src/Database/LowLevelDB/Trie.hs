@@ -3,8 +3,9 @@
 --
 -- <http://en.wikipedia.org/wiki/Trie>
 module Database.LowLevelDB.Trie
-  ( Trie (..)
+  ( Trie
   , TrieConstraint
+  , TrieNode
   , openTrie
   , openFileTrie
   , closeTrie
@@ -145,6 +146,7 @@ checkOff tr off = do
   where
     isz = fromIntegral $ trRecordLength tr
 
+-- | Run an action to needs the free list if we have one
 withFreeList ::  Trie k v -> (Maybe (FreeList Word64) -> IO a) -> IO a
 withFreeList tr f =case trFreeList tr of
     (Just mv) -> withMVar mv $ \fl -> f $ Just fl
@@ -231,7 +233,7 @@ lookupNode key tr = fst <$> (liftIO $ lookupNodes key tr)
 prefix :: (TrieConstraint k v m) => [k] -> Trie k v -> m [([k],v)]
 prefix = prefixF (\_ _ -> return True)
 
--- | Return all key and values for the given prefix which may be null (in which case all mappings are returned).
+-- | Return all key and values matching the given predicate for the given prefix which may be null (in which case all mappings are returned).
 prefixF :: (TrieConstraint k v m) => ([k] -> v -> m Bool) -> [k] -> Trie k v -> m [([k],v)]
 prefixF filt key tr = lookupNode key tr >>= collect (null key) key
   where
