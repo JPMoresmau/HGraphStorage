@@ -20,6 +20,7 @@ library
         Database.LowLevelDB.FreeList
         Database.LowLevelDB.MVCC
         Database.LowLevelDB.TxTrie
+        Database.LowLevelDB
     build-depends:
         base >=4 && <5,
         mmap -any,
@@ -73,6 +74,8 @@ test-suite test-LowLevelDB
         Database.LowLevelDB.TrieSpec
         Database.LowLevelDB.TxTrie
         Database.LowLevelDB.TxTrieSpec
+        Database.LowLevelDB
+        Database.LowLevelDBSpec
     ghc-options: -ferror-spans -Wall -threaded -rtsopts -with-rtsopts=-N
 
 benchmark bench-LowLevelDB

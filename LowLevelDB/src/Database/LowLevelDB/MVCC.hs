@@ -94,7 +94,7 @@ data MemoryTransactionManager = MemoryTransactionManager
     } deriving (Show,Read,Eq,Ord,Typeable,Generic)
 
 -- | Our Transaction Manager API
-class (Monad m) => TransactionManager m where
+class (MonadIO m) => TransactionManager m where
     newTx :: m Transaction
     lastID :: m Word64
     updateTx :: Transaction -> m ()
@@ -124,7 +124,7 @@ instance (Monad m) => MonadState MemoryTransactionManager (MVCCStateT m) where
     state = Gs . state
 
 -- | Memory implementation of the TransactionManager API
-instance (Monad m) =>TransactionManager (MVCCStateT m) where
+instance (MonadIO m) =>TransactionManager (MVCCStateT m) where
     newTx = newTransaction
     lastID = do
         tm <- get

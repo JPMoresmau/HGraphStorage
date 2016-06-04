@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ScopedTypeVariables,DeriveGeneric #-}
 -- | Transactional trie
 -- The trie uses the entity key + the transaction id that created the record as the key.
 -- Values are the transaction id that deleted the record and the entity value
@@ -21,12 +21,14 @@ import Data.Default
 import Foreign.Storable
 import Foreign.Storable.Record  as Store
 import Control.Monad.IO.Class
+import Data.Typeable
+import GHC.Generics (Generic)
 
 -- | the value in the trie keeps the entity value along with the transaction id that deleted the record
 data TxValue v = TxValue
     {  txMax :: Word64
     ,   txVal :: v
-    } deriving (Eq)
+    } deriving (Eq,Typeable,Generic)
 
 -- | Type of transaction tries, using Word8 as the key component
 type TxTrie v = Trie Word8 (TxValue v)
