@@ -66,11 +66,11 @@ pokeMM mm a sz = liftIO $ modifyMVar_ (mhHandle mm) p
   where
     p h_
       | inBounds h_ (sz + sizeOf a) = do
-          poke (plusPtr (mhPtr h_) sz) a
+          pokeByteOff (mhPtr h_) sz a
           return h_
       | otherwise = do
           h2_ <- extendMM h_ (mhName mm) (sz + sizeOf a)
-          poke (plusPtr (mhPtr h2_) sz) a
+          pokeByteOff  (mhPtr h2_) sz a
           return h2_
 
 -- | Write a strict bytetring into the handle at the given offset
@@ -122,11 +122,11 @@ peekMM mm off = liftIO $ modifyMVar (mhHandle mm) p
   where
     p h_
       | inBounds h_ off = do
-        a<-peek (plusPtr (mhPtr h_) off)
+        a<-peekByteOff  (mhPtr h_) off
         return (h_,a)
       | otherwise = do
         h2_ <- extendMM h_ (mhName mm) off
-        a<-peek (plusPtr (mhPtr h2_) off)
+        a<-peekByteOff  (mhPtr h2_) off
         return (h2_,a)
 
 -- | Read a strict byte string at the given offset
