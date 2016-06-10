@@ -9,6 +9,7 @@ module Database.LowLevelDB.TxTrie
   , txPrefix
   , TxTrie
   , openTxTrie
+  , withTxTrie
   , TxValue
 ) where
 
@@ -36,6 +37,11 @@ type TxTrie v = Trie Word8 (TxValue v)
 -- | open a transactional trie on a given file with an optional free list file
 openTxTrie  :: (Eq v,Storable v,Default v,MonadIO m) => FilePath -> Maybe FilePath -> m (TxTrie v)
 openTxTrie file mflf = openFileTrie file mflf
+
+-- | do an operation on transactional trie on a given file with an optional free list file, closing it afterwards
+withTxTrie  :: (Eq v,Storable v,Default v,MonadIO m) => FilePath -> Maybe FilePath -> ((TxTrie v) -> m a) -> m a
+withTxTrie file mflf  = withFileTrie file mflf
+
 
 -- | Default instance
 instance Default v => Default (TxValue v)where

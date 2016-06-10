@@ -20,9 +20,10 @@ spec = describe "MVCC tests" $ do
     describe "Persistent transactions" $
             mvccSpec (\act -> do
                 withTempFile "trie" $ \f -> do
-                    tr <- openFileTrie f Nothing
-                    tmf <- newTrieTransactionManager tr
-                    withPersistentTransactions tmf act) (\tm-> do
+                    withFileTrie f Nothing $ \tr-> do
+                      tmf <- newTrieTransactionManager tr
+                      withPersistentTransactions tmf act
+                      ) (\tm-> do
                 ttxmLast tm `shouldBe` 3)
 
 

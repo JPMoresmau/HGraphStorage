@@ -17,9 +17,10 @@ spec = describe "Transactional API tests" $
 
 dbAction :: (TransactionManager m) => FilePath -> m()
 dbAction f = do
-    tr<-openTxTrie f Nothing
-    withTransaction $ txAction1 tr
-    withTransaction $ txAction2 tr
+    withTxTrie f Nothing $ \tr -> do
+      withTransaction $ txAction1 tr
+      withTransaction $ txAction2 tr
+
 
 txAction1 :: (Transactional m) => TxTrie Int64 -> m()
 txAction1 tr = do

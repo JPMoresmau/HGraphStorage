@@ -7,6 +7,7 @@ module Database.LowLevelDB
    , withTransaction
    , TxT.TxTrie
    , TxT.openTxTrie
+   , TxT.withTxTrie
    , closeTrie
    , TransactionManager()
    ) where
@@ -31,9 +32,9 @@ data TxManagerOptions = TxManagerOptions
 -- | Run actions within a transaction manager
 withTxManager :: (MonadIO m) => TxManagerOptions -> MVCCTrieStateT m a -> m a
 withTxManager TxManagerOptions{..} act= do
-    tr <- openFileTrie txMgrTransactionFile txMgrTransactionFreeList
-    tmf <- newTrieTransactionManager tr
-    fst <$> withPersistentTransactions tmf act
+    withFileTrie txMgrTransactionFile txMgrTransactionFreeList $ \tr -> do
+      tmf <- newTrieTransactionManager tr
+      fst <$> withPersistentTransactions tmf act
 
 -- | Transactional API
 class (TransactionManager m)=>Transactional m where
@@ -86,5 +87,3 @@ instance (TransactionManager m) => Transactional (LowLevelDBTxT m) where
     txRollback = do
         tx <- get
         rollback tx
-
-

@@ -8,6 +8,7 @@ module Database.LowLevelDB.Trie
   , TrieNode
   , openTrie
   , openFileTrie
+  , withFileTrie
   , closeTrie
   , insertNew
   , insert
@@ -83,6 +84,14 @@ openFileTrie file mflf = liftIO $ do
   mfl <- sequenceA $ fmap (\flf->newFileFreeList flf (1::Word64)) mflf
   openTrie h mfl
 
+-- | Do an operation with a file trie, closing it afterwards
+withFileTrie :: (TrieConstraint k v m) => FilePath -> Maybe FilePath ->  ((Trie k v) -> m a) -> m a
+withFileTrie file mflf f = do
+  -- TODO should we use some variant of bracket here?
+  tr <- openFileTrie file mflf
+  ret <- f tr
+  closeTrie tr
+  return ret
 
 -- | Create a new trie with a given handle and an optional free list
 openTrie :: forall k v m . (TrieConstraint k v m) => MMapHandle (TrieNode k v) -> Maybe (FreeList Word64) -> m (Trie k v)

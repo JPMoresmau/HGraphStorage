@@ -50,4 +50,5 @@ spec = describe "Transactional Trie tests" $ do
                 lift (l3' `shouldBe` Just 0xB)
                 l3'' <- txLookup tx2 dataTr (3::Int64)
                 lift (l3'' `shouldBe` Nothing)
+                closeTrie dataTr
             closeTrie tr
