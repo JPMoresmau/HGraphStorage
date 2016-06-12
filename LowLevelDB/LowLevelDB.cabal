@@ -96,4 +96,5 @@ benchmark bench-LowLevelDB
     hs-source-dirs: perf
     other-modules:
         Database.LowLevelDB.TrieBench
+        Database.LowLevelDB.TxBench
     ghc-options: -fprof-auto -Wall -ferror-spans -threaded -rtsopts -with-rtsopts=-N2

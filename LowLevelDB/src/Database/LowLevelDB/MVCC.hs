@@ -32,7 +32,6 @@ import GHC.Generics (Generic)
 import Foreign.Ptr
 import Foreign.Storable as FS
 import Foreign.Storable.Record  as Store
-import Data.Int
 import Data.Word
 import qualified Data.Set as DS
 import qualified Data.Map as DM
@@ -49,12 +48,12 @@ data TransactionStatus =
 
 -- | Storable instance
 instance Storable TransactionStatus where
-    sizeOf _ = 1
-    alignment _ = 8
+    sizeOf _ = FS.sizeOf (1::Word8)
+    alignment _ = FS.alignment (1::Word8)
     peek ptr = do
-        i::Int8 <- FS.peek $ castPtr ptr
+        i::Word8 <- FS.peek $ castPtr ptr
         return $ toEnum $ fromIntegral i
-    poke ptr a = FS.poke (castPtr ptr) ((fromIntegral $ fromEnum a)::Int8)
+    poke ptr a = FS.poke (castPtr ptr) ((fromIntegral $ fromEnum a)::Word8)
 
 -- | A Transaction
 data Transaction = Transaction
